@@ -35,9 +35,11 @@ interface BusinessProfile {
     target_customer_summary: string | null;
 }
 
-interface BusinessService {
-    id?: number;
-    service_name: string;
+interface SerpPresenceResult {
+    title: string;
+    link: string;
+    snippet: string;
+    position: number | null;
 }
 
 interface Competitor {
@@ -69,7 +71,6 @@ const props = defineProps<{
     latestScan: Scan | null;
     missions: Mission[];
     businessProfile: BusinessProfile | null;
-    businessServices: BusinessService[];
     competitors: Competitor[];
     trackedKeywords: TrackedKeyword[];
     serperConfigured: boolean;
@@ -85,7 +86,7 @@ const visibilitySubTab = ref('technical');
 const businessSubTab = ref('profile');
 
 const visibilitySubTabs = [
-    { key: 'technical', label: 'Technical', categories: ['technical', 'analytics'] },
+    { key: 'technical', label: 'Technical', categories: ['technical', 'analytics', 'visibility'] },
     { key: 'social',    label: 'Social',    categories: ['social'] },
     { key: 'security',  label: 'Security',  categories: ['security'] },
     { key: 'misc',      label: 'Misc',      categories: [] as string[] },
@@ -153,13 +154,12 @@ const profileForm = reactive({
 const profileSaving = ref(false);
 const profileSaved = ref(false);
 
-const servicesForm = reactive({
-    services: props.businessServices.length > 0
-        ? props.businessServices.map(s => ({ service_name: s.service_name }))
-        : [{ service_name: '' }],
-});
-const servicesSaving = ref(false);
-const servicesSaved = ref(false);
+/* ── SERP Presence state ── */
+const serpPresenceResults = ref<SerpPresenceResult[]>([]);
+const serpPresenceMentions = ref<SerpPresenceResult[]>([]);
+const serpPresenceLoading = ref(false);
+const serpPresenceError = ref<string | null>(null);
+const serpPresenceSearched = ref(false);
 
 const competitorsForm = reactive({
     competitors: props.competitors.length > 0
@@ -227,15 +227,26 @@ function saveProfile() {
     });
 }
 
-function addService() { servicesForm.services.push({ service_name: '' }); }
-function removeService(i: number) { servicesForm.services.splice(i, 1); }
-
-function saveServices() {
-    servicesSaving.value = true;
-    router.put(`/sites/${props.site.id}/business-services`, { services: servicesForm.services }, {
-        preserveScroll: true,
-        onFinish: () => { servicesSaving.value = false; flash(servicesSaved); },
-    });
+async function searchSerpPresence() {
+    serpPresenceLoading.value = true;
+    serpPresenceError.value = null;
+    serpPresenceSearched.value = true;
+    try {
+        const res = await fetch(`/sites/${props.site.id}/serp-presence`);
+        const data = await res.json();
+        if (data.error) {
+            serpPresenceError.value = data.error;
+            serpPresenceResults.value = [];
+            serpPresenceMentions.value = [];
+        } else {
+            serpPresenceResults.value = data.results ?? [];
+            serpPresenceMentions.value = data.mentions ?? [];
+        }
+    } catch {
+        serpPresenceError.value = 'Failed to search. Please try again.';
+    } finally {
+        serpPresenceLoading.value = false;
+    }
 }
 
 function addCompetitor() { competitorsForm.competitors.push({ domain: '', label: '' }); }
@@ -564,21 +575,77 @@ function rankingClass(kw: TrackedKeyword): string {
                         </div>
                     </form>
 
-                    <form class="card biz-form" @submit.prevent="saveServices">
-                        <h3 class="biz-form__title">Your Services / Products</h3>
-                        <p class="biz-form__hint">List the main services or products you offer. These help us understand what keywords matter to you.</p>
-                        <div v-for="(svc, i) in servicesForm.services" :key="i" class="biz-form__row">
-                            <input v-model="svc.service_name" type="text" class="biz-field__input" :placeholder="`Service ${i + 1}`" />
-                            <button v-if="servicesForm.services.length > 1" type="button" class="biz-form__remove" @click="removeService(i)" title="Remove">×</button>
-                        </div>
-                        <button type="button" class="biz-form__add" @click="addService">+ Add service</button>
-                        <div class="biz-form__actions">
-                            <button type="submit" class="btn btn--primary btn--sm" :disabled="servicesSaving">
-                                {{ servicesSaving ? 'Saving…' : 'Save Services' }}
+                    <!-- SERP Presence Search -->
+                    <div class="card biz-form">
+                        <div class="kw-tracked__header">
+                            <h3 class="biz-form__title">Search Presence</h3>
+                            <button class="btn btn--secondary btn--sm" :disabled="serpPresenceLoading || !serperConfigured" @click="searchSerpPresence">
+                                {{ serpPresenceLoading ? 'Searching…' : 'Check Presence' }}
                             </button>
-                            <span v-if="servicesSaved" class="biz-form__saved">✓ Saved</span>
                         </div>
-                    </form>
+                        <p class="biz-form__hint">Discover which of your pages Google currently knows about. This searches for <strong>{{ site.normalized_domain }}</strong> across Google's index.</p>
+
+                        <div v-if="!serperConfigured" class="serp-presence__notice">
+                            🔑 Add your <code>SERPER_API_KEY</code> in <code>.env</code> to enable SERP presence search.
+                        </div>
+
+                        <div v-if="serpPresenceError" class="serp-presence__error">{{ serpPresenceError }}</div>
+
+                        <div v-if="serpPresenceSearched && !serpPresenceLoading && !serpPresenceError">
+                            <div v-if="serpPresenceResults.length === 0 && serpPresenceMentions.length === 0" class="serp-presence__empty">
+                                <p class="serp-presence__status serp-presence__status--warning">⚠️ No results found</p>
+                                <p class="serp-presence__meaning">Google doesn't appear to return any results when searching for your domain. This could mean your site is very new, has indexing issues, or is blocked from search engines.</p>
+                                <div class="serp-presence__actions">
+                                    <p><strong>What to do next:</strong></p>
+                                    <ul>
+                                        <li>Check your robots.txt isn't blocking Google</li>
+                                        <li>Submit your sitemap via Google Search Console</li>
+                                        <li>Ensure your pages have proper meta tags</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div v-else>
+                                <!-- Your pages -->
+                                <div v-if="serpPresenceResults.length > 0">
+                                    <p class="serp-presence__status serp-presence__status--good">
+                                        ✅ {{ serpPresenceResults.length }} of your pages appear in search results
+                                    </p>
+                                    <p class="serp-presence__meaning">When someone searches for "{{ site.normalized_domain }}", these pages from your site appear. The position shows where they rank.</p>
+                                    <div class="serp-presence__list">
+                                        <div v-for="(result, i) in serpPresenceResults" :key="'own-'+i" class="serp-presence__item">
+                                            <div class="serp-presence__item-header">
+                                                <a :href="result.link" target="_blank" rel="noopener" class="serp-presence__link">{{ result.title }}</a>
+                                                <span class="serp-presence__position">#{{ result.position }}</span>
+                                            </div>
+                                            <span class="serp-presence__url">{{ result.link }}</span>
+                                            <p v-if="result.snippet" class="serp-presence__snippet">{{ result.snippet }}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-else>
+                                    <p class="serp-presence__status serp-presence__status--warning">⚠️ None of your own pages appear in the top results</p>
+                                    <p class="serp-presence__meaning">When someone searches for your domain, your site doesn't appear in the top results. This may indicate indexing issues.</p>
+                                </div>
+
+                                <!-- Mentions on other sites -->
+                                <div v-if="serpPresenceMentions.length > 0" class="serp-presence__mentions">
+                                    <h4 class="serp-presence__subtitle">Other sites mentioning you</h4>
+                                    <p class="serp-presence__meaning">These third-party pages also appear when someone searches for your domain — directories, reviews, social profiles, etc.</p>
+                                    <div class="serp-presence__list">
+                                        <div v-for="(result, i) in serpPresenceMentions.slice(0, 10)" :key="'mention-'+i" class="serp-presence__item serp-presence__item--mention">
+                                            <div class="serp-presence__item-header">
+                                                <a :href="result.link" target="_blank" rel="noopener" class="serp-presence__link">{{ result.title }}</a>
+                                                <span class="serp-presence__position">#{{ result.position }}</span>
+                                            </div>
+                                            <span class="serp-presence__url">{{ result.link }}</span>
+                                            <p v-if="result.snippet" class="serp-presence__snippet">{{ result.snippet }}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ── Content sub-tab ── -->
@@ -1116,5 +1183,28 @@ function rankingClass(kw: TrackedKeyword): string {
 .kw-item__remove:hover { background: oklch(95% 0.04 27); color: oklch(55% 0.15 25); }
 
 .btn--xs { padding: 4px 10px; font-size: 12px; }
+
+/* ── SERP Presence ── */
+.serp-presence__notice { padding: var(--space-sm); background: oklch(92% 0.04 80); border-radius: 8px; font-size: 14px; color: oklch(45% 0.08 80); }
+.serp-presence__error { padding: var(--space-sm); background: oklch(92% 0.04 27); border-radius: 8px; font-size: 14px; color: oklch(50% 0.15 25); margin-bottom: var(--space-md); }
+.serp-presence__empty { margin-top: var(--space-md); }
+.serp-presence__status { font-weight: 600; font-size: 15px; margin-bottom: var(--space-xs); }
+.serp-presence__status--warning { color: oklch(55% 0.15 60); }
+.serp-presence__status--good { color: oklch(50% 0.14 155); }
+.serp-presence__meaning { font-size: 14px; color: oklch(55% 0.02 253); margin-bottom: var(--space-sm); }
+.serp-presence__actions { font-size: 14px; color: oklch(45% 0.02 253); }
+.serp-presence__actions ul { margin: var(--space-xs) 0 0 var(--space-md); padding: 0; }
+.serp-presence__actions li { margin-bottom: 4px; }
+.serp-presence__list { margin-top: var(--space-md); display: flex; flex-direction: column; gap: var(--space-sm); }
+.serp-presence__item { padding: var(--space-sm); background: oklch(97% 0.005 253); border-radius: 8px; border: 1px solid oklch(90% 0.01 253); }
+.serp-presence__link { font-weight: 600; font-size: 14px; color: oklch(45% 0.14 253); text-decoration: none; display: block; }
+.serp-presence__link:hover { text-decoration: underline; }
+.serp-presence__url { font-size: 12px; color: oklch(55% 0.08 155); display: block; margin: 2px 0 4px; word-break: break-all; }
+.serp-presence__snippet { font-size: 13px; color: oklch(50% 0.02 253); margin: 0; line-height: 1.4; }
+.serp-presence__item-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-sm); }
+.serp-presence__position { font-size: 12px; font-weight: 600; color: oklch(50% 0.14 253); background: oklch(93% 0.03 253); padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.serp-presence__item--mention { border-left: 3px solid oklch(85% 0.08 198); }
+.serp-presence__mentions { margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 1px solid oklch(90% 0.01 253); }
+.serp-presence__subtitle { font-size: 15px; font-weight: 600; color: oklch(35% 0.05 253); margin: 0 0 var(--space-xs); }
 </style>
 

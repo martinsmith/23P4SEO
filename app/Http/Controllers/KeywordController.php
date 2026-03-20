@@ -169,5 +169,24 @@ class KeywordController extends Controller
             'top_competitors' => $snapshot->top_competitor_domains_json ?? [],
         ];
     }
+
+    /**
+     * Search for any SERP appearance of the site's domain.
+     */
+    public function searchPresence(Site $site)
+    {
+        $searchService = new SerperSearchService();
+
+        if (!$searchService->isConfigured()) {
+            return response()->json([
+                'error' => 'Serper API is not configured. Add SERPER_API_KEY to your .env file.',
+            ], 422);
+        }
+
+        $location = $site->businessProfile?->primary_location ?? '';
+        $result = $searchService->searchDomainPresence($site->normalized_domain, $location);
+
+        return response()->json($result);
+    }
 }
 

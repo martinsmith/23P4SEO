@@ -34,3 +34,4 @@ Route::delete('/sites/{site}/keywords/{keyword}', [KeywordController::class, 'de
 Route::get('/sites/{site}/keywords/suggestions', [KeywordController::class, 'suggestions'])->name('keywords.suggestions');
 Route::post('/sites/{site}/keywords/{keyword}/check', [KeywordController::class, 'checkRanking'])->name('keywords.check');
 Route::post('/sites/{site}/keywords/check-all', [KeywordController::class, 'checkAllRankings'])->name('keywords.check-all');
+Route::get('/sites/{site}/serp-presence', [KeywordController::class, 'searchPresence'])->name('serp-presence.search');

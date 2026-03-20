@@ -11,6 +11,7 @@ use App\Services\Scanner\Checks\HomepageCheck;
 use App\Services\Scanner\Checks\LocalSEOCheck;
 use App\Services\Scanner\Checks\MetaTagCheck;
 use App\Services\Scanner\Checks\RobotsTxtCheck;
+use App\Services\Scanner\Checks\SearchConsoleCheck;
 use App\Services\Scanner\Checks\SecurityCheck;
 use App\Services\Scanner\Checks\ServiceCoverageCheck;
 use App\Services\Scanner\Checks\SitemapCheck;
@@ -34,6 +35,7 @@ class SiteScanner
             new TechnicalCheck(),
             new SecurityCheck(),
             new AnalyticsCheck(),
+            new SearchConsoleCheck(),
             new LocalSEOCheck(),
             new ServiceCoverageCheck(),
         ];

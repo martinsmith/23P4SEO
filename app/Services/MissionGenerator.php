@@ -390,6 +390,17 @@ class MissionGenerator
                 'title' => 'Service Page Coverage',
                 'pass_summary' => 'Your site has content covering all of your listed services. Each service is represented with dedicated content, giving you the best chance of ranking for service-specific searches.',
             ],
+
+            // === SEARCH CONSOLE ===
+            [
+                'pass_code' => 'pass_search_console',
+                'finding_codes' => ['no_search_console'],
+                'category' => 'visibility',
+                'priority' => 80,
+                'impact' => 'high',
+                'title' => 'Google Search Console',
+                'pass_summary' => 'Your site has Google Search Console verification set up. This gives you access to indexing tools, search performance data, and crawl diagnostics from Google.',
+            ],
         ];
     }
 
@@ -1075,6 +1086,30 @@ class MissionGenerator
                     ['text' => 'Verify your DNS is pointing to the correct server', 'type' => 'manual'],
                     ['text' => 'Check your application or CMS for errors', 'type' => 'manual'],
                     ['text' => 'Verify your homepage returns HTTP 200', 'type' => 'verify', 'validation' => ['check' => 'homepage_returns_200']],
+                ],
+            ],
+
+            // === SEARCH CONSOLE ===
+            'no_search_console' => [
+                'category' => 'visibility',
+                'priority' => 85,
+                'impact' => 'high',
+                'effort' => 'low',
+                'outcome' => 'Your site is connected to Google Search Console for indexing and monitoring',
+                'summary' => 'Google Search Console is the primary way to tell Google about your site, submit sitemaps, request indexing of new pages, and monitor how your site appears in search results. Without it, you\'re relying on Google to discover your site on its own — which can take weeks or may not happen at all.',
+                'rationale' => 'Search Console is free and gives you direct control over how Google indexes your site. It\'s the single most important tool for getting a new site visible in search results.',
+                'resources' => [
+                    ['type' => 'link', 'label' => 'Google Search Console', 'url' => 'https://search.google.com/search-console'],
+                    ['type' => 'link', 'label' => 'Google: Verify your site ownership', 'url' => 'https://support.google.com/webmasters/answer/9008080'],
+                    ['type' => 'tip', 'label' => 'Why this matters', 'content' => 'Without Search Console, you cannot request indexing, submit sitemaps, or see which queries bring people to your site. For new sites, this is the difference between appearing in Google within days versus weeks.'],
+                ],
+                'tasks' => [
+                    ['text' => 'Go to Google Search Console (search.google.com/search-console) and sign in with your Google account', 'type' => 'manual'],
+                    ['text' => 'Click "Add property" and choose "URL prefix", then enter your full site URL', 'type' => 'manual'],
+                    ['text' => 'Verify ownership using one of the methods offered (HTML meta tag, DNS record, or HTML file upload)', 'type' => 'manual'],
+                    ['text' => 'Once verified, go to Sitemaps in the left menu and submit your sitemap URL', 'type' => 'manual'],
+                    ['text' => 'Use URL Inspection to request indexing of your homepage', 'type' => 'manual'],
+                    ['text' => 'Verify Search Console verification is detected on your site', 'type' => 'verify', 'validation' => ['check' => 'has_search_console']],
                 ],
             ],
         ];

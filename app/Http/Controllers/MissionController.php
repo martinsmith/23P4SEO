@@ -39,7 +39,6 @@ class MissionController extends Controller
             });
 
         $businessProfile = $site->businessProfile;
-        $businessServices = $site->businessServices()->orderBy('priority_order')->get();
         $competitors = $site->competitors()->where('active', true)->get();
 
         $trackedKeywords = $site->trackedKeywords()
@@ -78,7 +77,6 @@ class MissionController extends Controller
             'latestScan' => $latestScan,
             'missions' => $missions,
             'businessProfile' => $businessProfile,
-            'businessServices' => $businessServices,
             'competitors' => $competitors,
             'trackedKeywords' => $trackedKeywords,
             'serperConfigured' => $serperConfigured,

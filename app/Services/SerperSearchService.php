@@ -110,6 +110,77 @@ class SerperSearchService
         ]);
     }
 
+    /**
+     * Search for any appearance of a domain in organic results.
+     * Searches for the domain name as a query, then separates results
+     * into "your pages" (from the domain) and "mentions" (other sites referencing you).
+     */
+    public function searchDomainPresence(string $domain, string $location = ''): array
+    {
+        $query = $domain;
+
+        try {
+            $params = [
+                'q' => $query,
+                'gl' => 'gb',
+                'hl' => 'en',
+                'num' => 100,
+            ];
+
+            $response = Http::timeout(15)
+                ->withHeaders([
+                    'X-API-KEY' => $this->apiKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->post('https://google.serper.dev/search', $params);
+
+            if (!$response->ok()) {
+                Log::warning('Serper domain presence search failed', [
+                    'status' => $response->status(),
+                    'domain' => $domain,
+                    'body' => $response->body(),
+                ]);
+                return ['error' => 'Search API returned an error. Please try again.', 'results' => [], 'mentions' => []];
+            }
+
+            $data = $response->json();
+            $organic = $data['organic'] ?? [];
+
+            $ownPages = [];
+            $mentions = [];
+
+            foreach ($organic as $index => $item) {
+                $itemUrl = $item['link'] ?? '';
+                $itemDomain = $this->extractDomain($itemUrl);
+                $entry = [
+                    'title' => $item['title'] ?? '',
+                    'link' => $itemUrl,
+                    'snippet' => $item['snippet'] ?? '',
+                    'position' => $index + 1,
+                ];
+
+                if ($this->domainMatches($itemDomain, $domain)) {
+                    $ownPages[] = $entry;
+                } else {
+                    $mentions[] = $entry;
+                }
+            }
+
+            return [
+                'error' => null,
+                'query' => $query,
+                'results' => $ownPages,
+                'mentions' => $mentions,
+            ];
+        } catch (\Exception $e) {
+            Log::error('Serper domain presence search exception', [
+                'domain' => $domain,
+                'error' => $e->getMessage(),
+            ]);
+            return ['error' => 'Search request failed. Please try again.', 'results' => [], 'mentions' => []];
+        }
+    }
+
     protected function extractDomain(string $url): string
     {
         $host = parse_url($url, PHP_URL_HOST) ?? '';
