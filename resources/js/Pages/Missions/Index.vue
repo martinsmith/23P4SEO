@@ -33,7 +33,6 @@ const props = defineProps<{
 const scanning = ref(false);
 const showDeleteModal = ref(false);
 const deleting = ref(false);
-const showCompleted = ref(false);
 
 const activeMissions = props.missions.filter(m => m.status !== 'completed');
 const completedMissions = props.missions.filter(m => m.status === 'completed');
@@ -169,16 +168,13 @@ function statusClass(status: string): string {
                     <p class="missions-index__empty-text">✅ All missions completed — your site is in great shape!</p>
                 </div>
 
+                <!-- Divider -->
+                <hr v-if="activeMissions.length > 0 && completedMissions.length > 0" class="missions-divider" />
+
                 <!-- Completed missions -->
-                <div v-if="completedMissions.length > 0" class="missions-section missions-section--completed">
-                    <button class="missions-section__toggle" @click="showCompleted = !showCompleted">
-                        <h2 class="missions-section__title">
-                            Completed
-                            <span class="missions-section__count">{{ completedMissions.length }}</span>
-                        </h2>
-                        <span class="missions-section__chevron" :class="{ 'missions-section__chevron--open': showCompleted }">▸</span>
-                    </button>
-                    <div v-if="showCompleted" class="missions-grid missions-grid--completed">
+                <div v-if="completedMissions.length > 0" class="missions-section">
+                    <h2 class="missions-section__title">Completed <span class="missions-section__count">{{ completedMissions.length }}</span></h2>
+                    <div class="missions-grid">
                         <Link
                             v-for="mission in completedMissions"
                             :key="mission.id"
@@ -186,7 +182,7 @@ function statusClass(status: string): string {
                             class="card card--interactive mission-card mission-card--completed"
                         >
                             <div class="mission-card__header">
-                                <span class="tag tag--success">✓ Passed</span>
+                                <span class="tag tag--passed">✓ Passed</span>
                                 <span class="mission-card__category">{{ mission.category }}</span>
                             </div>
                             <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
@@ -276,14 +272,13 @@ function statusClass(status: string): string {
     font-size: 13px; font-weight: 600; color: var(--color-text-muted);
     background: var(--color-border); border-radius: 10px; padding: 2px 8px;
 }
-.missions-section__toggle {
-    display: flex; align-items: center; justify-content: space-between; width: 100%;
-    background: none; border: none; cursor: pointer; padding: 0; margin-bottom: var(--space-lg);
+
+/* Divider between sections */
+.missions-divider {
+    border: none;
+    border-top: 2px solid var(--color-border);
+    margin: var(--space-xl) 0;
 }
-.missions-section__chevron {
-    font-size: 1.25rem; color: var(--color-text-muted); transition: transform 0.2s ease;
-}
-.missions-section__chevron--open { transform: rotate(90deg); }
 
 /* Grid */
 .missions-grid {
@@ -293,21 +288,40 @@ function statusClass(status: string): string {
 }
 
 /* Card */
-.mission-card { display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+.mission-card {
+    display: flex; flex-direction: column; text-decoration: none; color: inherit;
+    background: oklch(98% 0.006 27); border-color: oklch(93% 0.015 27);
+}
 .mission-card__header { display: flex; gap: 8px; margin-bottom: var(--space-md); }
 .mission-card__finding { font-size: 0.9375rem; font-weight: 700; color: var(--color-text); margin: 0 0 6px; line-height: 1.4; }
 .mission-card__summary { font-size: 14px; color: var(--color-text-muted); line-height: 1.7; flex: 1; margin-bottom: var(--space-md); }
-.mission-card__footer { display: flex; align-items: center; justify-content: space-between; padding-top: var(--space-md); border-top: 1px solid var(--color-border); }
+.mission-card__footer { display: flex; align-items: center; justify-content: space-between; padding-top: var(--space-md); border-top: 1px solid oklch(93% 0.015 27); }
 .mission-card__progress { display: flex; align-items: center; gap: 10px; }
-.mission-card__progress-bar { width: 80px; height: 6px; background: var(--color-border); border-radius: 3px; overflow: hidden; }
+.mission-card__progress-bar { width: 80px; height: 6px; background: oklch(92% 0.01 27); border-radius: 3px; overflow: hidden; }
 .mission-card__progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width 0.3s ease; }
 .mission-card__progress-text { font-size: 12px; color: var(--color-text-faint); font-weight: 600; }
 .mission-card__category { font-size: 12px; font-weight: 600; color: var(--color-text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
 
-/* Completed card variant */
-.mission-card--completed { opacity: 0.85; }
+/* Severity-specific tag colours for active cards */
+.mission-card .tag--neutral  { background: oklch(90% 0.06 70);  color: oklch(42% 0.10 70); }  /* low — pale orange */
+.mission-card .tag--info     { background: oklch(90% 0.06 70);  color: oklch(42% 0.10 70); }  /* medium-low — pale orange */
+.mission-card .tag--warning  { background: oklch(88% 0.06 27);  color: oklch(42% 0.16 27); }  /* high — pale red */
+.mission-card .tag--danger   { background: oklch(60% 0.20 27);  color: #fff; }                /* critical — solid red */
+
+/* Completed card variant — green background */
+.mission-card--completed {
+    background: oklch(98% 0.008 145); border-color: oklch(93% 0.02 145);
+}
 .mission-card--completed .mission-card__finding { font-size: 0.875rem; }
 .mission-card--completed .mission-card__summary { font-size: 13px; }
+
+/* Passed tag — darker green */
+.tag--passed {
+    background: oklch(82% 0.10 145); color: oklch(30% 0.12 145);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; font-size: 12px; font-weight: 600;
+    border-radius: var(--radius-sm); letter-spacing: 0.02em; text-transform: uppercase;
+}
 
 /* Danger zone */
 .danger-zone {
