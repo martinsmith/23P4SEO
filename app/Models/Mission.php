@@ -13,6 +13,7 @@ class Mission extends Model
         'source_scan_id',
         'source_type',
         'source_finding_title',
+        'source_finding_code',
         'category',
         'status',
         'priority_score',

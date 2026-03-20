@@ -29,13 +29,10 @@ class MissionGenerator
             }
 
             // Skip if an open mission already exists for this finding code on this site.
-            // We match by outcome_statement + category as a proxy for the finding code,
-            // since multiple finding codes can map to different templates with unique outcomes.
             $existingMission = Mission::where('site_id', $finding->site_id)
                 ->whereIn('status', ['suggested', 'active', 'in_progress'])
                 ->where('source_type', 'scan_finding')
-                ->where('category', $template['category'])
-                ->where('outcome_statement', $template['outcome'])
+                ->where('source_finding_code', $finding->code)
                 ->first();
 
             if ($existingMission) {
@@ -47,6 +44,7 @@ class MissionGenerator
                 'source_scan_id' => $scan->id,
                 'source_type' => 'scan_finding',
                 'source_finding_title' => $finding->title,
+                'source_finding_code' => $finding->code,
                 'category' => $template['category'],
                 'status' => 'suggested',
                 'priority_score' => $template['priority'],
@@ -78,6 +76,291 @@ class MissionGenerator
     }
 
     /**
+     * Auto-complete missions whose source finding is no longer present in the latest scan.
+     * Called after generateFromScan to "heal" missions that the user has fixed.
+     */
+    public function healFromScan(SiteScan $scan): array
+    {
+        // Get all finding codes from this scan (non-info, open)
+        $currentFindingCodes = $scan->findings()
+            ->where('severity', '!=', 'info')
+            ->where('status', 'open')
+            ->pluck('code')
+            ->toArray();
+
+        // Find open missions for this site that have a source_finding_code
+        // and whose code is NOT in the current scan findings
+        $missionsToHeal = Mission::where('site_id', $scan->site_id)
+            ->whereIn('status', ['suggested', 'active', 'in_progress'])
+            ->where('source_type', 'scan_finding')
+            ->whereNotNull('source_finding_code')
+            ->when(count($currentFindingCodes) > 0, function ($query) use ($currentFindingCodes) {
+                $query->whereNotIn('source_finding_code', $currentFindingCodes);
+            })
+            ->get();
+
+        $healed = [];
+
+        foreach ($missionsToHeal as $mission) {
+            // Complete all pending tasks
+            $mission->tasks()
+                ->where('status', '!=', 'completed')
+                ->update([
+                    'status' => 'completed',
+                    'completed_at' => now(),
+                ]);
+
+            // Complete the mission
+            $mission->update([
+                'status' => 'completed',
+                'completed_at' => now(),
+            ]);
+
+            $healed[] = $mission;
+        }
+
+        return $healed;
+    }
+
+    /**
+     * Generate pre-completed missions for checks that passed (no issues found).
+     * These provide informative "you're doing this right" cards.
+     */
+    public function generatePassMissions(SiteScan $scan): array
+    {
+        // Get all finding codes from this scan (non-info, open)
+        $failedCodes = $scan->findings()
+            ->where('severity', '!=', 'info')
+            ->where('status', 'open')
+            ->pluck('code')
+            ->toArray();
+
+        $created = [];
+
+        foreach ($this->passTemplates() as $passTemplate) {
+            // If ANY of the related finding codes fired, this area has a problem — skip
+            $hasFailing = !empty(array_intersect($passTemplate['finding_codes'], $failedCodes));
+            if ($hasFailing) {
+                continue;
+            }
+
+            // Skip if a mission already exists for this pass code
+            $existingMission = Mission::where('site_id', $scan->site_id)
+                ->where('source_type', 'scan_finding')
+                ->where('source_finding_code', $passTemplate['pass_code'])
+                ->first();
+
+            if ($existingMission) {
+                continue;
+            }
+
+            $mission = Mission::create([
+                'site_id' => $scan->site_id,
+                'source_scan_id' => $scan->id,
+                'source_type' => 'scan_finding',
+                'source_finding_title' => $passTemplate['title'],
+                'source_finding_code' => $passTemplate['pass_code'],
+                'category' => $passTemplate['category'],
+                'status' => 'completed',
+                'priority_score' => $passTemplate['priority'],
+                'impact_level' => $passTemplate['impact'],
+                'effort_level' => 'low',
+                'outcome_statement' => $passTemplate['title'],
+                'user_summary' => $passTemplate['pass_summary'],
+                'rationale_summary' => null,
+                'resources_json' => [],
+                'created_by' => 'system',
+                'completed_at' => now(),
+            ]);
+
+            $created[] = $mission;
+        }
+
+        return $created;
+    }
+
+    /**
+     * Templates for passing checks — grouped by check area.
+     * Each entry lists the finding codes that, if absent, mean the area is healthy.
+     */
+    protected function passTemplates(): array
+    {
+        return [
+            [
+                'pass_code' => 'pass_robots_txt',
+                'finding_codes' => ['robots_txt_blocks_all', 'robots_txt_missing', 'robots_txt_no_sitemap', 'robots_txt_invalid'],
+                'category' => 'technical',
+                'priority' => 40,
+                'impact' => 'low',
+                'title' => 'robots.txt',
+                'pass_summary' => 'Your robots.txt file is properly configured, allows search engine access, and references your sitemap.',
+            ],
+            [
+                'pass_code' => 'pass_sitemap',
+                'finding_codes' => ['sitemap_missing', 'sitemap_empty', 'sitemap_invalid'],
+                'category' => 'technical',
+                'priority' => 70,
+                'impact' => 'high',
+                'title' => 'XML Sitemap',
+                'pass_summary' => 'Your site has a valid XML sitemap that search engines can use to discover your pages.',
+            ],
+            [
+                'pass_code' => 'pass_homepage_indexable',
+                'finding_codes' => ['homepage_noindex', 'homepage_not_200'],
+                'category' => 'technical',
+                'priority' => 98,
+                'impact' => 'critical',
+                'title' => 'Homepage Indexability',
+                'pass_summary' => 'Your homepage returns HTTP 200 and has no noindex directive — search engines can index it without issue.',
+            ],
+            [
+                'pass_code' => 'pass_title_tag',
+                'finding_codes' => ['homepage_no_title', 'homepage_title_too_short'],
+                'category' => 'content',
+                'priority' => 90,
+                'impact' => 'critical',
+                'title' => 'Title Tag',
+                'pass_summary' => 'Your homepage has a well-formed title tag of appropriate length, giving search engines a clear signal about your page.',
+            ],
+            [
+                'pass_code' => 'pass_meta_description',
+                'finding_codes' => ['homepage_no_meta_description'],
+                'category' => 'content',
+                'priority' => 60,
+                'impact' => 'medium',
+                'title' => 'Meta Description',
+                'pass_summary' => 'Your homepage has a meta description, giving you control over the snippet shown in search results.',
+            ],
+            [
+                'pass_code' => 'pass_h1',
+                'finding_codes' => ['homepage_no_h1'],
+                'category' => 'content',
+                'priority' => 50,
+                'impact' => 'medium',
+                'title' => 'H1 Heading',
+                'pass_summary' => 'Your homepage has an H1 heading that clearly signals what the page is about to both visitors and search engines.',
+            ],
+            [
+                'pass_code' => 'pass_https',
+                'finding_codes' => ['not_https'],
+                'category' => 'security',
+                'priority' => 75,
+                'impact' => 'high',
+                'title' => 'HTTPS',
+                'pass_summary' => 'Your site is served securely over HTTPS. Browsers show it as secure and Google uses this as a ranking signal.',
+            ],
+            [
+                'pass_code' => 'pass_og_title',
+                'finding_codes' => ['missing_og_title'],
+                'category' => 'social',
+                'priority' => 45,
+                'impact' => 'medium',
+                'title' => 'Open Graph Title',
+                'pass_summary' => 'Your homepage has an og:title tag, so social media previews will display a proper title when shared.',
+            ],
+            [
+                'pass_code' => 'pass_og_description',
+                'finding_codes' => ['missing_og_description'],
+                'category' => 'social',
+                'priority' => 40,
+                'impact' => 'medium',
+                'title' => 'Open Graph Description',
+                'pass_summary' => 'Your homepage has an og:description tag for compelling social media previews.',
+            ],
+            [
+                'pass_code' => 'pass_og_image',
+                'finding_codes' => ['missing_og_image'],
+                'category' => 'social',
+                'priority' => 50,
+                'impact' => 'high',
+                'title' => 'Open Graph Image',
+                'pass_summary' => 'Your homepage has an og:image tag, so social shares will include a visual preview image.',
+            ],
+            [
+                'pass_code' => 'pass_twitter_card',
+                'finding_codes' => ['missing_twitter_card'],
+                'category' => 'social',
+                'priority' => 30,
+                'impact' => 'low',
+                'title' => 'Twitter Card',
+                'pass_summary' => 'Your homepage has a twitter:card tag, enabling rich previews when shared on X/Twitter.',
+            ],
+            [
+                'pass_code' => 'pass_canonical',
+                'finding_codes' => ['missing_canonical'],
+                'category' => 'technical',
+                'priority' => 55,
+                'impact' => 'medium',
+                'title' => 'Canonical URL',
+                'pass_summary' => 'Your homepage specifies a canonical URL, helping search engines consolidate ranking signals and avoid duplicate content issues.',
+            ],
+            [
+                'pass_code' => 'pass_structured_data',
+                'finding_codes' => ['missing_structured_data'],
+                'category' => 'technical',
+                'priority' => 45,
+                'impact' => 'medium',
+                'title' => 'Structured Data',
+                'pass_summary' => 'Your homepage includes JSON-LD structured data, making it eligible for rich search results like star ratings and business info panels.',
+            ],
+            [
+                'pass_code' => 'pass_lang',
+                'finding_codes' => ['missing_lang'],
+                'category' => 'technical',
+                'priority' => 40,
+                'impact' => 'medium',
+                'title' => 'Language Attribute',
+                'pass_summary' => 'Your page declares its language via the lang attribute, helping search engines and accessibility tools serve the right audience.',
+            ],
+            [
+                'pass_code' => 'pass_viewport',
+                'finding_codes' => ['missing_viewport'],
+                'category' => 'technical',
+                'priority' => 75,
+                'impact' => 'high',
+                'title' => 'Viewport Meta Tag',
+                'pass_summary' => 'Your site has a viewport meta tag, ensuring it renders correctly on mobile devices and passes mobile-friendliness checks.',
+            ],
+            [
+                'pass_code' => 'pass_charset',
+                'finding_codes' => ['missing_charset'],
+                'category' => 'technical',
+                'priority' => 25,
+                'impact' => 'low',
+                'title' => 'Character Encoding',
+                'pass_summary' => 'Your page declares its character encoding, ensuring text renders correctly across all browsers.',
+            ],
+            [
+                'pass_code' => 'pass_csp',
+                'finding_codes' => ['missing_csp'],
+                'category' => 'security',
+                'priority' => 20,
+                'impact' => 'low',
+                'title' => 'Content-Security-Policy',
+                'pass_summary' => 'Your site sends a Content-Security-Policy header, providing an extra layer of defence against cross-site scripting attacks.',
+            ],
+            [
+                'pass_code' => 'pass_x_content_type_options',
+                'finding_codes' => ['missing_x_content_type_options'],
+                'category' => 'security',
+                'priority' => 20,
+                'impact' => 'low',
+                'title' => 'X-Content-Type-Options',
+                'pass_summary' => 'Your site sends the X-Content-Type-Options: nosniff header, preventing browsers from MIME-type sniffing uploaded files.',
+            ],
+            [
+                'pass_code' => 'pass_mixed_content',
+                'finding_codes' => ['mixed_content'],
+                'category' => 'security',
+                'priority' => 55,
+                'impact' => 'medium',
+                'title' => 'No Mixed Content',
+                'pass_summary' => 'All resources on your HTTPS page are loaded securely — no mixed content warnings for visitors.',
+            ],
+        ];
+    }
+
+    /**
      * Map finding codes to mission templates.
      */
     protected function templateFor(string $code): ?array
@@ -99,7 +382,7 @@ class MissionGenerator
                 'impact' => 'critical',
                 'effort' => 'low',
                 'outcome' => 'Search engines can crawl your site',
-                'summary' => 'Your robots.txt is blocking all search engine crawlers. Until this is fixed, your site cannot appear in search results.',
+                'summary' => 'Your robots.txt file contains a rule that blocks all search engine crawlers from accessing your site. No pages can be indexed until this is corrected.',
                 'rationale' => 'The Disallow: / directive in robots.txt tells all crawlers to stay away from every page on your site.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Correct robots.txt that allows crawling', 'content' => "User-agent: *\nAllow: /\n\nSitemap: https://yourdomain.com/sitemap.xml"],
@@ -119,7 +402,7 @@ class MissionGenerator
                 'impact' => 'low',
                 'effort' => 'low',
                 'outcome' => 'Your site has a robots.txt file guiding search engines',
-                'summary' => 'Your site is missing a robots.txt file. While not strictly required, it helps communicate crawling preferences.',
+                'summary' => 'No robots.txt file was found at your domain root. Search engines will still crawl your site, but you have no way to guide which areas they should or shouldn\'t access.',
                 'rationale' => 'A robots.txt file helps search engines crawl your site more efficiently.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: A basic robots.txt file', 'content' => "User-agent: *\nAllow: /\n\n# Block admin/private areas\nUser-agent: *\nDisallow: /admin/\nDisallow: /private/\n\nSitemap: https://yourdomain.com/sitemap.xml"],
@@ -139,7 +422,7 @@ class MissionGenerator
                 'impact' => 'low',
                 'effort' => 'low',
                 'outcome' => 'Your robots.txt references your sitemap for faster discovery',
-                'summary' => 'Your robots.txt does not include a Sitemap directive. Adding one helps search engines find your sitemap faster.',
+                'summary' => 'Your robots.txt exists but does not reference your sitemap. Search engines may take longer to discover your pages without this pointer.',
                 'rationale' => 'The Sitemap directive in robots.txt is an additional discovery mechanism beyond Search Console submission.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add this line to the end of your robots.txt', 'content' => "Sitemap: https://yourdomain.com/sitemap.xml"],
@@ -158,7 +441,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your robots.txt contains valid directives',
-                'summary' => 'Your robots.txt file exists but doesn\'t contain valid directives. Search engines may ignore it.',
+                'summary' => 'Your robots.txt file was found but contains no recognisable directives. Search engines are likely ignoring it entirely.',
                 'rationale' => 'An invalid robots.txt can lead to unpredictable crawling behavior.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Properly formatted robots.txt', 'content' => "User-agent: *\nAllow: /\nDisallow: /admin/\n\nUser-agent: Googlebot\nAllow: /\n\nSitemap: https://yourdomain.com/sitemap.xml"],
@@ -180,7 +463,7 @@ class MissionGenerator
                 'impact' => 'high',
                 'effort' => 'medium',
                 'outcome' => 'Search engines can discover all your pages via an XML sitemap',
-                'summary' => 'Your site has no XML sitemap. Without one, search engines must rely on crawling links to find your pages.',
+                'summary' => 'No XML sitemap was found on your site. Search engines must rely on crawling links alone, which means some pages may never be discovered.',
                 'rationale' => 'An XML sitemap is one of the most effective ways to ensure search engines know about all your important pages.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: A basic sitemap.xml', 'content' => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>https://yourdomain.com/</loc>\n    <lastmod>2026-01-15</lastmod>\n    <priority>1.0</priority>\n  </url>\n  <url>\n    <loc>https://yourdomain.com/about</loc>\n    <lastmod>2026-01-10</lastmod>\n    <priority>0.8</priority>\n  </url>\n</urlset>"],
@@ -202,7 +485,7 @@ class MissionGenerator
                 'impact' => 'high',
                 'effort' => 'medium',
                 'outcome' => 'Your sitemap contains URLs for search engines to index',
-                'summary' => 'Your sitemap exists but contains no URLs. Search engines cannot discover pages from an empty sitemap.',
+                'summary' => 'Your sitemap.xml file exists but lists zero URLs. Search engines will parse it and find nothing to index.',
                 'rationale' => 'A sitemap with zero URLs provides no benefit. It needs to list your important pages.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Sitemap with URL entries', 'content' => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>https://yourdomain.com/</loc>\n    <changefreq>weekly</changefreq>\n    <priority>1.0</priority>\n  </url>\n  <url>\n    <loc>https://yourdomain.com/services</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>\n</urlset>"],
@@ -221,7 +504,7 @@ class MissionGenerator
                 'impact' => 'high',
                 'effort' => 'medium',
                 'outcome' => 'Your sitemap is valid XML that search engines can parse',
-                'summary' => 'Your sitemap.xml file exists but doesn\'t contain valid sitemap XML structure.',
+                'summary' => 'Your sitemap.xml was found but its XML structure is malformed. Search engines cannot parse it in its current state.',
                 'rationale' => 'Search engines need properly structured XML to parse your sitemap.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Required XML structure', 'content' => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>https://yourdomain.com/page</loc>\n  </url>\n</urlset>"],
@@ -243,7 +526,7 @@ class MissionGenerator
                 'impact' => 'critical',
                 'effort' => 'low',
                 'outcome' => 'Your homepage can be indexed by search engines',
-                'summary' => 'Your homepage has a noindex directive, preventing it from appearing in search results entirely.',
+                'summary' => 'A noindex directive is present on your homepage, which tells search engines not to include it in results. This is almost certainly unintentional.',
                 'rationale' => 'A noindex tag or header tells search engines to exclude the page. This is almost certainly unintentional for a homepage.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'What to look for in your HTML <head>', 'content' => "<!-- Remove this tag if found -->\n<meta name=\"robots\" content=\"noindex\">\n\n<!-- Or this variation -->\n<meta name=\"robots\" content=\"noindex, nofollow\">"],
@@ -263,7 +546,7 @@ class MissionGenerator
                 'impact' => 'critical',
                 'effort' => 'low',
                 'outcome' => 'Your homepage has a descriptive title tag for search results',
-                'summary' => 'Your homepage is missing a <title> tag — one of the most important on-page SEO elements.',
+                'summary' => 'No <title> tag was found on your homepage. This is one of the strongest on-page ranking signals and controls what appears in search results and browser tabs.',
                 'rationale' => 'The title tag is displayed in search results and browser tabs. It\'s a primary ranking signal.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Adding a title tag', 'content' => "<head>\n  <title>Your Business Name — What You Do | Location</title>\n</head>"],
@@ -283,7 +566,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your homepage title is descriptive and keyword-rich',
-                'summary' => 'Your homepage title is very short. A well-crafted title of 50–60 characters can improve click-through rates.',
+                'summary' => 'Your homepage title tag is unusually short. Titles under 30 characters miss the opportunity to include keywords and a compelling description that improves click-through rates.',
                 'rationale' => 'Short titles miss the opportunity to include relevant keywords and compelling copy.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Short vs. optimised title', 'content' => "<!-- Too short -->\n<title>My Site</title>\n\n<!-- Better: descriptive and keyword-rich -->\n<title>My Site — Expert Web Design & SEO Services in London</title>"],
@@ -302,7 +585,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your homepage has a compelling meta description for search results',
-                'summary' => 'Your homepage is missing a meta description. This text often appears below your title in search results.',
+                'summary' => 'No meta description was found on your homepage. Search engines will auto-generate a snippet from the page content, which is often less compelling than a hand-written one.',
                 'rationale' => 'While not a direct ranking factor, a good meta description improves click-through rates from search results.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Adding a meta description', 'content' => "<head>\n  <meta name=\"description\" content=\"We help small businesses grow online with expert SEO, web design, and digital marketing services. Free consultation available.\">\n</head>"],
@@ -321,7 +604,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your homepage has a clear H1 heading',
-                'summary' => 'Your homepage doesn\'t have an H1 heading. The H1 should clearly state what your page is about.',
+                'summary' => 'No H1 heading was found on your homepage. The H1 is the primary on-page signal that tells search engines and visitors what the page is about.',
                 'rationale' => 'H1 tags help search engines and users understand your page\'s main topic.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Adding an H1 heading', 'content' => "<body>\n  <h1>Expert Web Design & SEO Services for Small Businesses</h1>\n  <!-- rest of page content -->\n</body>"],
@@ -340,7 +623,7 @@ class MissionGenerator
                 'impact' => 'high',
                 'effort' => 'medium',
                 'outcome' => 'Your site is served securely over HTTPS',
-                'summary' => 'Your site is not using HTTPS. Google uses HTTPS as a ranking signal, and browsers mark HTTP sites as "Not Secure".',
+                'summary' => 'Your site is being served over plain HTTP. Browsers display a "Not Secure" warning and Google uses HTTPS as a ranking signal, so this hurts both trust and visibility.',
                 'rationale' => 'HTTPS is essential for user trust, data security, and SEO. Most hosting providers offer free SSL certificates.',
                 'resources' => [
                     ['type' => 'tip', 'label' => 'Free SSL certificates', 'content' => "Let's Encrypt provides free SSL certificates. Most hosting providers (Netlify, Vercel, Cloudflare, cPanel hosts) offer one-click SSL setup."],
@@ -364,7 +647,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your homepage has Open Graph tags for rich social sharing',
-                'summary' => 'Your homepage is missing an og:title meta tag. When shared on Facebook or LinkedIn, the preview won\'t have a proper title.',
+                'summary' => 'No og:title meta tag was found. When your page is shared on Facebook, LinkedIn, or other platforms, the preview will lack a proper title and may look broken.',
                 'rationale' => 'Open Graph tags control how your page appears when shared on social platforms. Without them, platforms guess — often poorly.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add these OG tags to your <head>', 'content' => "<meta property=\"og:title\" content=\"Your Page Title\">\n<meta property=\"og:description\" content=\"A brief description of your page\">\n<meta property=\"og:image\" content=\"https://yourdomain.com/images/share.jpg\">\n<meta property=\"og:url\" content=\"https://yourdomain.com/\">\n<meta property=\"og:type\" content=\"website\">"],
@@ -384,7 +667,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your social shares include a compelling description',
-                'summary' => 'Your homepage is missing an og:description tag. Social previews will lack a description.',
+                'summary' => 'No og:description tag was found. Social media previews of your page will be missing a description, reducing the chance of clicks.',
                 'rationale' => 'The og:description controls the snippet text shown in social media previews.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example og:description tag', 'content' => "<meta property=\"og:description\" content=\"We help small businesses grow with expert SEO and web design. Free consultation.\">"],
@@ -402,7 +685,7 @@ class MissionGenerator
                 'impact' => 'high',
                 'effort' => 'low',
                 'outcome' => 'Your social shares display an eye-catching image',
-                'summary' => 'Your homepage has no og:image tag. Posts shared on social media will have no image, dramatically reducing engagement.',
+                'summary' => 'No og:image tag was found. Social media posts linking to your site will appear without an image, which dramatically reduces engagement and click-through rates.',
                 'rationale' => 'Social posts with images get significantly more clicks and shares than those without.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example og:image tag', 'content' => "<meta property=\"og:image\" content=\"https://yourdomain.com/images/og-share.jpg\">\n<meta property=\"og:image:width\" content=\"1200\">\n<meta property=\"og:image:height\" content=\"630\">"],
@@ -420,7 +703,7 @@ class MissionGenerator
                 'impact' => 'low',
                 'effort' => 'low',
                 'outcome' => 'Your site displays rich previews when shared on X/Twitter',
-                'summary' => 'Your homepage lacks a twitter:card meta tag. Shares on X/Twitter won\'t show rich previews.',
+                'summary' => 'No twitter:card meta tag was found. When your site is shared on X/Twitter, it will appear as a plain text link instead of a rich preview with an image and description.',
                 'rationale' => 'Twitter Cards enable rich media previews. Without them, links appear as plain text URLs.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add Twitter Card tags', 'content' => "<meta name=\"twitter:card\" content=\"summary_large_image\">\n<meta name=\"twitter:title\" content=\"Your Page Title\">\n<meta name=\"twitter:description\" content=\"A brief description\">\n<meta name=\"twitter:image\" content=\"https://yourdomain.com/images/share.jpg\">"],
@@ -440,7 +723,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your homepage specifies a canonical URL to prevent duplicate content',
-                'summary' => 'Your homepage does not have a canonical link tag. This can cause duplicate content issues if your page is reachable via multiple URLs.',
+                'summary' => 'No canonical link tag was found on your homepage. If the page is reachable at multiple URLs (www vs non-www, HTTP vs HTTPS), search engines may split ranking signals between them.',
                 'rationale' => 'A canonical tag tells search engines which URL is the "official" version of a page, consolidating ranking signals.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add a canonical tag to your <head>', 'content' => "<link rel=\"canonical\" href=\"https://yourdomain.com/\">"],
@@ -459,7 +742,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'medium',
                 'outcome' => 'Your homepage uses structured data to enable rich search results',
-                'summary' => 'Your homepage has no JSON-LD structured data. Adding schema markup can enable rich results like star ratings, FAQs, and business info in search.',
+                'summary' => 'No JSON-LD structured data was found on your homepage. Without it, your site misses out on rich search results like star ratings, FAQs, and business info panels.',
                 'rationale' => 'Structured data helps search engines understand your content and can unlock rich result features that increase click-through rates.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example: Local Business JSON-LD', 'content' => "<script type=\"application/ld+json\">\n{\n  \"@context\": \"https://schema.org\",\n  \"@type\": \"LocalBusiness\",\n  \"name\": \"Your Business Name\",\n  \"url\": \"https://yourdomain.com\",\n  \"telephone\": \"+44 1234 567890\",\n  \"address\": {\n    \"@type\": \"PostalAddress\",\n    \"streetAddress\": \"123 Main St\",\n    \"addressLocality\": \"London\",\n    \"postalCode\": \"SW1A 1AA\",\n    \"addressCountry\": \"GB\"\n  }\n}\n</script>"],
@@ -480,7 +763,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'low',
                 'outcome' => 'Your page declares its language for search engines and accessibility tools',
-                'summary' => 'Your homepage\'s <html> tag is missing a lang attribute. This helps search engines serve your page to the right audience.',
+                'summary' => 'Your <html> tag has no lang attribute. Search engines and screen readers cannot determine the page\'s language, which may affect both rankings and accessibility.',
                 'rationale' => 'The lang attribute improves accessibility for screen readers and helps search engines understand your content\'s language.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add lang to your <html> tag', 'content' => "<html lang=\"en\">\n  <!-- for UK English use lang=\"en-GB\" -->\n  <!-- for US English use lang=\"en-US\" -->"],
@@ -497,7 +780,7 @@ class MissionGenerator
                 'impact' => 'high',
                 'effort' => 'low',
                 'outcome' => 'Your site is mobile-friendly with a proper viewport tag',
-                'summary' => 'Your homepage is missing the viewport meta tag. Without it, mobile devices will render the page at desktop width, making it unusable.',
+                'summary' => 'No viewport meta tag was found. Mobile devices will render your page at desktop width, making it difficult to use and failing Google\'s mobile-friendliness checks.',
                 'rationale' => 'Google uses mobile-first indexing. A missing viewport tag means your site fails mobile-friendliness checks.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add the viewport meta tag', 'content' => "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"],
@@ -514,7 +797,7 @@ class MissionGenerator
                 'impact' => 'low',
                 'effort' => 'low',
                 'outcome' => 'Your page declares its character encoding',
-                'summary' => 'Your homepage does not declare a character encoding. Some browsers may display text incorrectly.',
+                'summary' => 'No character encoding declaration was found. Without one, some browsers may render special characters or non-English text incorrectly.',
                 'rationale' => 'Declaring charset ensures consistent text rendering across all browsers and devices.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add charset as the first tag in <head>', 'content' => "<head>\n  <meta charset=\"UTF-8\">\n  <!-- other head elements -->\n</head>"],
@@ -532,7 +815,7 @@ class MissionGenerator
                 'impact' => 'low',
                 'effort' => 'high',
                 'outcome' => 'Your site uses Content-Security-Policy to prevent XSS attacks',
-                'summary' => 'Your site does not send a Content-Security-Policy header. CSP is a defence-in-depth measure against cross-site scripting.',
+                'summary' => 'No Content-Security-Policy header was detected. CSP is a security layer that helps prevent cross-site scripting (XSS) and data injection attacks on your site.',
                 'rationale' => 'While not a direct ranking factor, security headers build trust and prevent attacks that could compromise your site.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Example basic CSP header', 'content' => "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"],
@@ -552,7 +835,7 @@ class MissionGenerator
                 'impact' => 'low',
                 'effort' => 'low',
                 'outcome' => 'Your site sends the X-Content-Type-Options security header',
-                'summary' => 'Your site is missing the X-Content-Type-Options: nosniff header, which prevents MIME-type sniffing attacks.',
+                'summary' => 'The X-Content-Type-Options header is not being sent. Without it, browsers may incorrectly interpret uploaded files as executable content, creating a security risk.',
                 'rationale' => 'This is a simple security header that prevents browsers from incorrectly interpreting files as different content types.',
                 'resources' => [
                     ['type' => 'code', 'label' => 'Add this header in your server config', 'content' => "# Apache (.htaccess)\nHeader set X-Content-Type-Options \"nosniff\"\n\n# Nginx\nadd_header X-Content-Type-Options \"nosniff\" always;"],
@@ -568,7 +851,7 @@ class MissionGenerator
                 'impact' => 'medium',
                 'effort' => 'medium',
                 'outcome' => 'Your HTTPS site loads all resources securely',
-                'summary' => 'Your HTTPS page references resources over plain HTTP. This can trigger browser warnings and block content.',
+                'summary' => 'Your HTTPS page loads some resources (images, scripts, or stylesheets) over plain HTTP. Browsers may block these resources or show security warnings to visitors.',
                 'rationale' => 'Mixed content undermines HTTPS security. Browsers may block insecure resources, breaking page functionality.',
                 'resources' => [
                     ['type' => 'tip', 'label' => 'Finding mixed content', 'content' => 'Open your browser\'s DevTools console and look for "Mixed Content" warnings. These tell you exactly which resources need updating.'],
@@ -587,7 +870,7 @@ class MissionGenerator
                 'impact' => 'critical',
                 'effort' => 'high',
                 'outcome' => 'Your homepage returns a successful HTTP 200 response',
-                'summary' => 'Your homepage is returning an error status code. This means search engines and visitors cannot access your site properly.',
+                'summary' => 'Your homepage is returning an error HTTP status code instead of 200 OK. Search engines cannot index the page and visitors will see an error.',
                 'rationale' => 'A homepage that doesn\'t return HTTP 200 is a critical issue that prevents indexing and drives away visitors.',
                 'resources' => [
                     ['type' => 'tip', 'label' => 'Common HTTP error codes', 'content' => "403 = Forbidden (check file permissions). 404 = Not Found (check your web root or routing). 500 = Server Error (check application logs). 502/503 = Gateway/Unavailable (check your server or hosting is running)."],

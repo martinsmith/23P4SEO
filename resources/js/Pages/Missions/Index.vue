@@ -33,6 +33,10 @@ const props = defineProps<{
 const scanning = ref(false);
 const showDeleteModal = ref(false);
 const deleting = ref(false);
+const showCompleted = ref(false);
+
+const activeMissions = props.missions.filter(m => m.status !== 'completed');
+const completedMissions = props.missions.filter(m => m.status === 'completed');
 
 function runScan() {
     scanning.value = true;
@@ -114,48 +118,83 @@ function statusClass(status: string): string {
                 </button>
             </div>
 
-            <!-- Scanned but no missions (all clear) -->
+            <!-- Scanned but no missions at all -->
             <div v-else-if="missions.length === 0" class="card missions-index__empty">
                 <p class="missions-index__empty-text">✅ No issues found — your site looks good!</p>
             </div>
 
-            <!-- Missions grid -->
-            <div v-else class="missions-grid">
-                <Link
-                    v-for="mission in missions"
-                    :key="mission.id"
-                    :href="`/sites/${site.id}/missions/${mission.id}`"
-                    class="card card--interactive mission-card"
-                >
-                    <div class="mission-card__header">
-                        <span :class="['tag', priorityClass(mission.priority_score)]">
-                            {{ priorityLabel(mission.priority_score) }}
-                        </span>
-                        <span :class="['tag', statusClass(mission.status)]">
-                            {{ statusLabel(mission.status) }}
-                        </span>
-                    </div>
-
-                    <h3 v-if="mission.source_finding_title" class="mission-card__finding">{{ mission.source_finding_title }}</h3>
-                    <p class="mission-card__outcome">{{ mission.outcome_statement }}</p>
-                    <p class="mission-card__summary">{{ mission.user_summary }}</p>
-
-                    <div class="mission-card__footer">
-                        <div class="mission-card__progress">
-                            <div class="mission-card__progress-bar">
-                                <div
-                                    class="mission-card__progress-fill"
-                                    :style="{ width: mission.total_tasks > 0 ? (mission.completed_tasks / mission.total_tasks * 100) + '%' : '0%' }"
-                                ></div>
+            <template v-else>
+                <!-- Active missions -->
+                <div v-if="activeMissions.length > 0" class="missions-section">
+                    <h2 class="missions-section__title">To Do <span class="missions-section__count">{{ activeMissions.length }}</span></h2>
+                    <div class="missions-grid">
+                        <Link
+                            v-for="mission in activeMissions"
+                            :key="mission.id"
+                            :href="`/sites/${site.id}/missions/${mission.id}`"
+                            class="card card--interactive mission-card"
+                        >
+                            <div class="mission-card__header">
+                                <span :class="['tag', priorityClass(mission.priority_score)]">
+                                    {{ priorityLabel(mission.priority_score) }}
+                                </span>
+                                <span :class="['tag', statusClass(mission.status)]">
+                                    {{ statusLabel(mission.status) }}
+                                </span>
                             </div>
-                            <span class="mission-card__progress-text">
-                                {{ mission.completed_tasks }}/{{ mission.total_tasks }} tasks
-                            </span>
-                        </div>
-                        <span class="mission-card__category">{{ mission.category }}</span>
+
+                            <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
+                            <p class="mission-card__summary">{{ mission.user_summary }}</p>
+
+                            <div class="mission-card__footer">
+                                <div class="mission-card__progress">
+                                    <div class="mission-card__progress-bar">
+                                        <div
+                                            class="mission-card__progress-fill"
+                                            :style="{ width: mission.total_tasks > 0 ? (mission.completed_tasks / mission.total_tasks * 100) + '%' : '0%' }"
+                                        ></div>
+                                    </div>
+                                    <span class="mission-card__progress-text">
+                                        {{ mission.completed_tasks }}/{{ mission.total_tasks }} tasks
+                                    </span>
+                                </div>
+                                <span class="mission-card__category">{{ mission.category }}</span>
+                            </div>
+                        </Link>
                     </div>
-                </Link>
-            </div>
+                </div>
+
+                <!-- No active missions but completed exist -->
+                <div v-else class="card missions-index__empty">
+                    <p class="missions-index__empty-text">✅ All missions completed — your site is in great shape!</p>
+                </div>
+
+                <!-- Completed missions -->
+                <div v-if="completedMissions.length > 0" class="missions-section missions-section--completed">
+                    <button class="missions-section__toggle" @click="showCompleted = !showCompleted">
+                        <h2 class="missions-section__title">
+                            Completed
+                            <span class="missions-section__count">{{ completedMissions.length }}</span>
+                        </h2>
+                        <span class="missions-section__chevron" :class="{ 'missions-section__chevron--open': showCompleted }">▸</span>
+                    </button>
+                    <div v-if="showCompleted" class="missions-grid missions-grid--completed">
+                        <Link
+                            v-for="mission in completedMissions"
+                            :key="mission.id"
+                            :href="`/sites/${site.id}/missions/${mission.id}`"
+                            class="card card--interactive mission-card mission-card--completed"
+                        >
+                            <div class="mission-card__header">
+                                <span class="tag tag--success">✓ Passed</span>
+                                <span class="mission-card__category">{{ mission.category }}</span>
+                            </div>
+                            <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
+                            <p class="mission-card__summary">{{ mission.user_summary }}</p>
+                        </Link>
+                    </div>
+                </div>
+            </template>
 
             <!-- Danger zone -->
             <div class="card danger-zone">
@@ -227,19 +266,36 @@ function statusClass(status: string): string {
     margin: 0 0 var(--space-lg); line-height: 1.7;
 }
 
+/* Sections */
+.missions-section { margin-bottom: var(--space-xl); }
+.missions-section__title {
+    font-size: 1.125rem; font-weight: 700; color: var(--color-text);
+    margin: 0 0 var(--space-lg); display: inline-flex; align-items: center; gap: 8px;
+}
+.missions-section__count {
+    font-size: 13px; font-weight: 600; color: var(--color-text-muted);
+    background: var(--color-border); border-radius: 10px; padding: 2px 8px;
+}
+.missions-section__toggle {
+    display: flex; align-items: center; justify-content: space-between; width: 100%;
+    background: none; border: none; cursor: pointer; padding: 0; margin-bottom: var(--space-lg);
+}
+.missions-section__chevron {
+    font-size: 1.25rem; color: var(--color-text-muted); transition: transform 0.2s ease;
+}
+.missions-section__chevron--open { transform: rotate(90deg); }
+
 /* Grid */
 .missions-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: var(--space-lg);
-    margin-bottom: var(--space-xl);
 }
 
 /* Card */
 .mission-card { display: flex; flex-direction: column; text-decoration: none; color: inherit; }
 .mission-card__header { display: flex; gap: 8px; margin-bottom: var(--space-md); }
-.mission-card__finding { font-size: 0.9375rem; font-weight: 700; color: var(--color-text); margin: 0 0 4px; line-height: 1.4; }
-.mission-card__outcome { font-size: 14px; font-weight: 500; color: var(--color-cobalt); margin-bottom: 6px; line-height: 1.4; }
+.mission-card__finding { font-size: 0.9375rem; font-weight: 700; color: var(--color-text); margin: 0 0 6px; line-height: 1.4; }
 .mission-card__summary { font-size: 14px; color: var(--color-text-muted); line-height: 1.7; flex: 1; margin-bottom: var(--space-md); }
 .mission-card__footer { display: flex; align-items: center; justify-content: space-between; padding-top: var(--space-md); border-top: 1px solid var(--color-border); }
 .mission-card__progress { display: flex; align-items: center; gap: 10px; }
@@ -247,6 +303,11 @@ function statusClass(status: string): string {
 .mission-card__progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width 0.3s ease; }
 .mission-card__progress-text { font-size: 12px; color: var(--color-text-faint); font-weight: 600; }
 .mission-card__category { font-size: 12px; font-weight: 600; color: var(--color-text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
+
+/* Completed card variant */
+.mission-card--completed { opacity: 0.85; }
+.mission-card--completed .mission-card__finding { font-size: 0.875rem; }
+.mission-card--completed .mission-card__summary { font-size: 13px; }
 
 /* Danger zone */
 .danger-zone {
