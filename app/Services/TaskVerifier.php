@@ -42,6 +42,12 @@ class TaskVerifier
             'has_x_content_type_options' => $this->checkHasXContentTypeOptions($site),
             // Analytics checks
             'has_analytics' => $this->checkHasAnalytics($site),
+            // Local SEO checks
+            'homepage_mentions_location' => $this->checkHomepageMentionsLocation($site),
+            'title_mentions_location' => $this->checkTitleMentionsLocation($site),
+            'has_local_schema' => $this->checkHasLocalSchema($site),
+            'has_gbp_link' => $this->checkHasGBPLink($site),
+            'homepage_has_business_name' => $this->checkHomepageHasBusinessName($site),
             default => ['passed' => false, 'message' => "Unknown check: {$checkName}", 'evidence' => []],
         };
     }
@@ -361,5 +367,124 @@ class TaskVerifier
         }
 
         return ['passed' => false, 'message' => 'No analytics tracking detected on your homepage', 'evidence' => []];
+    }
+
+    // === Local SEO verification methods ===
+
+    protected function checkHomepageMentionsLocation(Site $site): array
+    {
+        $profile = $site->businessProfile;
+        if (!$profile || !$profile->primary_location) {
+            return ['passed' => false, 'message' => 'No business profile or location set', 'evidence' => []];
+        }
+
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+
+        $location = $profile->primary_location;
+        $body = strip_tags($h['body']);
+
+        if (stripos($body, $location) !== false) {
+            return ['passed' => true, 'message' => "Location \"{$location}\" found on homepage", 'evidence' => []];
+        }
+
+        // Check individual significant words
+        $words = preg_split('/[\s,]+/', $location);
+        foreach ($words as $word) {
+            if (strlen($word) >= 3 && stripos($body, $word) !== false) {
+                return ['passed' => true, 'message' => "Location word \"{$word}\" found on homepage", 'evidence' => []];
+            }
+        }
+
+        return ['passed' => false, 'message' => "Location \"{$location}\" not found on homepage", 'evidence' => []];
+    }
+
+    protected function checkTitleMentionsLocation(Site $site): array
+    {
+        $profile = $site->businessProfile;
+        if (!$profile || !$profile->primary_location) {
+            return ['passed' => false, 'message' => 'No business profile or location set', 'evidence' => []];
+        }
+
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+
+        preg_match('/<title[^>]*>(.*?)<\/title>/is', $h['body'], $m);
+        $title = trim(html_entity_decode($m[1] ?? ''));
+        $location = $profile->primary_location;
+
+        if ($title === '') {
+            return ['passed' => false, 'message' => 'No title tag found', 'evidence' => []];
+        }
+
+        // Check full location or significant words
+        if (stripos($title, $location) !== false) {
+            return ['passed' => true, 'message' => "Title contains \"{$location}\"", 'evidence' => ['title' => $title]];
+        }
+
+        $words = preg_split('/[\s,]+/', $location);
+        foreach ($words as $word) {
+            if (strlen($word) >= 3 && stripos($title, $word) !== false) {
+                return ['passed' => true, 'message' => "Title contains location word \"{$word}\"", 'evidence' => ['title' => $title]];
+            }
+        }
+
+        return ['passed' => false, 'message' => "Title \"{$title}\" does not mention \"{$location}\"", 'evidence' => ['title' => $title]];
+    }
+
+    protected function checkHasLocalSchema(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+
+        if (preg_match('/"@type"\s*:\s*"(LocalBusiness|Store|Restaurant|MedicalBusiness|LegalService|FinancialService|ProfessionalService|HomeAndConstructionBusiness|AutomotiveBusiness|Plumber|Electrician|HVACBusiness|Locksmith|RoofingContractor|GeneralContractor)"/i', $h['body'])) {
+            return ['passed' => true, 'message' => 'LocalBusiness structured data found', 'evidence' => []];
+        }
+
+        if (preg_match('/itemtype=["\']https?:\/\/schema\.org\/LocalBusiness/i', $h['body'])) {
+            return ['passed' => true, 'message' => 'LocalBusiness microdata found', 'evidence' => []];
+        }
+
+        return ['passed' => false, 'message' => 'No LocalBusiness structured data found', 'evidence' => []];
+    }
+
+    protected function checkHasGBPLink(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+
+        if (preg_match('/href=["\'][^"\']*(?:google\.com\/maps|maps\.google|goo\.gl\/maps|business\.google\.com|g\.page)/i', $h['body'])) {
+            return ['passed' => true, 'message' => 'Google Business Profile / Maps link found', 'evidence' => []];
+        }
+
+        return ['passed' => false, 'message' => 'No Google Business Profile or Maps link found', 'evidence' => []];
+    }
+
+    protected function checkHomepageHasBusinessName(Site $site): array
+    {
+        $profile = $site->businessProfile;
+        if (!$profile || !$profile->business_name) {
+            return ['passed' => false, 'message' => 'No business name set in profile', 'evidence' => []];
+        }
+
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+
+        $text = strip_tags($h['body']);
+        if (stripos($text, $profile->business_name) !== false) {
+            return ['passed' => true, 'message' => "Business name \"{$profile->business_name}\" found on homepage", 'evidence' => []];
+        }
+
+        return ['passed' => false, 'message' => "Business name \"{$profile->business_name}\" not found on homepage", 'evidence' => []];
     }
 }

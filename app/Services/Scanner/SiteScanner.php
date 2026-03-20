@@ -8,9 +8,11 @@ use App\Models\SiteScan;
 use App\Services\Scanner\Checks\AnalyticsCheck;
 use App\Services\Scanner\Checks\BaseCheck;
 use App\Services\Scanner\Checks\HomepageCheck;
+use App\Services\Scanner\Checks\LocalSEOCheck;
 use App\Services\Scanner\Checks\MetaTagCheck;
 use App\Services\Scanner\Checks\RobotsTxtCheck;
 use App\Services\Scanner\Checks\SecurityCheck;
+use App\Services\Scanner\Checks\ServiceCoverageCheck;
 use App\Services\Scanner\Checks\SitemapCheck;
 use App\Services\Scanner\Checks\TechnicalCheck;
 use Illuminate\Support\Carbon;
@@ -32,6 +34,8 @@ class SiteScanner
             new TechnicalCheck(),
             new SecurityCheck(),
             new AnalyticsCheck(),
+            new LocalSEOCheck(),
+            new ServiceCoverageCheck(),
         ];
     }
 

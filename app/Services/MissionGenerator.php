@@ -368,6 +368,28 @@ class MissionGenerator
                 'title' => 'Analytics Tracking',
                 'pass_summary' => 'Your site has analytics tracking installed. You can measure traffic, understand visitor behaviour, and track the impact of your SEO improvements.',
             ],
+
+            // === LOCAL SEO ===
+            [
+                'pass_code' => 'pass_local_seo',
+                'finding_codes' => ['homepage_no_location', 'title_no_location', 'no_local_schema', 'no_gbp_link', 'homepage_no_business_name'],
+                'category' => 'local_seo',
+                'priority' => 70,
+                'impact' => 'high',
+                'title' => 'Local SEO Signals',
+                'pass_summary' => 'Your homepage has strong local SEO signals — your location, business name, and local structured data are all present, giving you a solid foundation for local search visibility.',
+            ],
+
+            // === SERVICE COVERAGE ===
+            [
+                'pass_code' => 'pass_service_coverage',
+                'finding_codes' => ['service_not_found', 'service_no_dedicated_page'],
+                'category' => 'content',
+                'priority' => 65,
+                'impact' => 'high',
+                'title' => 'Service Page Coverage',
+                'pass_summary' => 'Your site has content covering all of your listed services. Each service is represented with dedicated content, giving you the best chance of ranking for service-specific searches.',
+            ],
         ];
     }
 
@@ -896,6 +918,142 @@ class MissionGenerator
                     ['text' => 'Copy the tracking snippet and paste it into the <head> of every page on your site', 'type' => 'manual'],
                     ['text' => 'Visit your site and check the analytics dashboard to confirm data is being received', 'type' => 'manual'],
                     ['text' => 'Verify analytics tracking is present on your homepage', 'type' => 'verify', 'validation' => ['check' => 'has_analytics']],
+                ],
+            ],
+
+            // === LOCAL SEO (Business Context) ===
+            'homepage_no_location' => [
+                'category' => 'local_seo',
+                'priority' => 80,
+                'impact' => 'high',
+                'effort' => 'low',
+                'outcome' => 'Your homepage mentions your location for local search visibility',
+                'summary' => 'Your homepage does not mention your primary location. For a local business, this is one of the most important signals for appearing in local search results.',
+                'rationale' => 'Google uses on-page location mentions as a key factor when deciding which businesses to show for local searches. If your location isn\'t on the page, you\'re invisible to "near me" and city-based searches.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'Where to add it', 'content' => 'Mention your city/area naturally in your headline, opening paragraph, and footer. Avoid keyword stuffing — write for humans first.'],
+                    ['type' => 'link', 'label' => 'Google: Improve your local ranking', 'url' => 'https://support.google.com/business/answer/7091'],
+                ],
+                'tasks' => [
+                    ['text' => 'Add your location to the homepage heading or subheading', 'type' => 'manual'],
+                    ['text' => 'Include your city and area naturally in your opening paragraph', 'type' => 'manual'],
+                    ['text' => 'Add your full address to the footer of every page', 'type' => 'manual'],
+                    ['text' => 'Verify your location appears on the homepage', 'type' => 'verify', 'validation' => ['check' => 'homepage_mentions_location']],
+                ],
+            ],
+            'title_no_location' => [
+                'category' => 'local_seo',
+                'priority' => 70,
+                'impact' => 'high',
+                'effort' => 'low',
+                'outcome' => 'Your page title includes your location for local search ranking',
+                'summary' => 'Your homepage title tag does not include your location. The title tag is one of the strongest ranking signals — adding your city helps you appear in local searches.',
+                'rationale' => 'Title tags are the first thing Google reads about your page. Including your location tells search engines exactly where you operate, improving your chances for local queries.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'Title format', 'content' => 'A good format: "[Service] in [City] | [Business Name]" e.g. "Lift Maintenance in Manchester | Altius Lifts"'],
+                    ['type' => 'link', 'label' => 'Google: Title tag best practices', 'url' => 'https://developers.google.com/search/docs/appearance/title-link'],
+                ],
+                'tasks' => [
+                    ['text' => 'Add your city/area to your homepage title tag', 'type' => 'manual'],
+                    ['text' => 'Keep the total title under 60 characters', 'type' => 'manual'],
+                    ['text' => 'Verify location is in the title', 'type' => 'verify', 'validation' => ['check' => 'title_mentions_location']],
+                ],
+            ],
+            'no_local_schema' => [
+                'category' => 'local_seo',
+                'priority' => 60,
+                'impact' => 'medium',
+                'effort' => 'medium',
+                'outcome' => 'Your site has LocalBusiness structured data for rich search results',
+                'summary' => 'Your homepage does not contain LocalBusiness structured data (schema.org markup). This markup helps Google understand your business name, address, phone, opening hours, and service area — increasing your chances of appearing in map results and knowledge panels.',
+                'rationale' => 'Structured data gives search engines explicit information about your business. Without it, Google has to guess your details from unstructured text.',
+                'resources' => [
+                    ['type' => 'code', 'label' => 'Example: LocalBusiness JSON-LD', 'content' => "<script type=\"application/ld+json\">\n{\n  \"@context\": \"https://schema.org\",\n  \"@type\": \"LocalBusiness\",\n  \"name\": \"Your Business Name\",\n  \"address\": {\n    \"@type\": \"PostalAddress\",\n    \"streetAddress\": \"123 Main St\",\n    \"addressLocality\": \"Manchester\",\n    \"addressRegion\": \"Greater Manchester\",\n    \"postalCode\": \"M1 1AA\",\n    \"addressCountry\": \"GB\"\n  },\n  \"telephone\": \"+44-161-XXX-XXXX\",\n  \"url\": \"https://yoursite.com\"\n}\n</script>"],
+                    ['type' => 'link', 'label' => 'Google: Local business structured data', 'url' => 'https://developers.google.com/search/docs/appearance/structured-data/local-business'],
+                    ['type' => 'link', 'label' => 'Schema.org markup validator', 'url' => 'https://validator.schema.org/'],
+                ],
+                'tasks' => [
+                    ['text' => 'Create a LocalBusiness JSON-LD script tag with your business details', 'type' => 'manual'],
+                    ['text' => 'Add it to the <head> of your homepage (and ideally all pages)', 'type' => 'manual'],
+                    ['text' => 'Validate using Google\'s Rich Results Test', 'type' => 'manual'],
+                    ['text' => 'Verify LocalBusiness schema is present', 'type' => 'verify', 'validation' => ['check' => 'has_local_schema']],
+                ],
+            ],
+            'no_gbp_link' => [
+                'category' => 'local_seo',
+                'priority' => 55,
+                'impact' => 'medium',
+                'effort' => 'low',
+                'outcome' => 'Your site links to your Google Business Profile',
+                'summary' => 'Your homepage does not link to a Google Business Profile listing. Linking to your GBP helps customers find your reviews, directions, and contact details, and reinforces your local presence to Google.',
+                'rationale' => 'A Google Business Profile is essential for local businesses. Linking from your website to your GBP creates a clear connection between your web presence and your Google listing.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'Don\'t have a GBP yet?', 'content' => 'Create one for free at business.google.com. It\'s one of the most impactful things a local business can do for search visibility.'],
+                    ['type' => 'link', 'label' => 'Google Business Profile', 'url' => 'https://business.google.com'],
+                    ['type' => 'link', 'label' => 'Google: Set up your Business Profile', 'url' => 'https://support.google.com/business/answer/10514137'],
+                ],
+                'tasks' => [
+                    ['text' => 'If you don\'t have one, create a Google Business Profile at business.google.com', 'type' => 'manual'],
+                    ['text' => 'Add a link to your GBP listing or Google Maps location on your homepage', 'type' => 'manual'],
+                    ['text' => 'Consider adding it to your footer so it appears on every page', 'type' => 'manual'],
+                    ['text' => 'Verify GBP link is present on homepage', 'type' => 'verify', 'validation' => ['check' => 'has_gbp_link']],
+                ],
+            ],
+            'homepage_no_business_name' => [
+                'category' => 'local_seo',
+                'priority' => 50,
+                'impact' => 'medium',
+                'effort' => 'low',
+                'outcome' => 'Your business name appears consistently on your homepage',
+                'summary' => 'Your homepage does not appear to display your business name in visible text. For local SEO, consistently displaying your business name (part of NAP — Name, Address, Phone) helps search engines verify your identity.',
+                'rationale' => 'NAP consistency is a core local SEO signal. If Google can\'t find your business name on your own website, it weakens the connection to your listings elsewhere.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'NAP consistency', 'content' => 'Make sure your business name, address, and phone number are exactly the same on your website, Google Business Profile, and any other directories.'],
+                ],
+                'tasks' => [
+                    ['text' => 'Add your full business name visibly on the homepage', 'type' => 'manual'],
+                    ['text' => 'Include your business name in the footer of every page', 'type' => 'manual'],
+                    ['text' => 'Verify business name appears on homepage', 'type' => 'verify', 'validation' => ['check' => 'homepage_has_business_name']],
+                ],
+            ],
+
+            // === SERVICE COVERAGE (Business Context) ===
+            'service_not_found' => [
+                'category' => 'content',
+                'priority' => 75,
+                'impact' => 'high',
+                'effort' => 'medium',
+                'outcome' => 'Your website has content covering all of your core services',
+                'summary' => 'One of your listed services could not be found anywhere on your site. Creating content about this service helps potential customers and search engines understand what you offer.',
+                'rationale' => 'If you don\'t have a page or content for a service you offer, you cannot rank for searches related to that service. Every core service should have at least a dedicated section, ideally its own page.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'Service page best practice', 'content' => 'Each service page should have: a clear heading with the service name, 300–500 words of unique content, your location, customer benefits, and a call to action.'],
+                    ['type' => 'tip', 'label' => 'Internal linking', 'content' => 'Link to service pages from your homepage and navigation. This tells search engines these are important pages.'],
+                ],
+                'tasks' => [
+                    ['text' => 'Create a dedicated page for this service', 'type' => 'manual'],
+                    ['text' => 'Write 300–500 words of unique content describing what you offer', 'type' => 'manual'],
+                    ['text' => 'Include your location and service area on the page', 'type' => 'manual'],
+                    ['text' => 'Add a link to this page from your homepage and main navigation', 'type' => 'manual'],
+                ],
+            ],
+            'service_no_dedicated_page' => [
+                'category' => 'content',
+                'priority' => 60,
+                'impact' => 'medium',
+                'effort' => 'medium',
+                'outcome' => 'Each core service has its own dedicated page for better search targeting',
+                'summary' => 'This service is mentioned on your homepage but doesn\'t appear to have its own dedicated page. A focused page for each service gives you the best chance of ranking for service-specific searches.',
+                'rationale' => 'Individual service pages can target specific keywords and provide detailed information that a homepage cannot. They also increase the number of entry points to your site from search results.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'URL structure', 'content' => 'Use a clean URL like /lift-maintenance or /services/lift-maintenance — include the service name in the URL slug.'],
+                    ['type' => 'tip', 'label' => 'Page structure', 'content' => 'Include: H1 with service name, intro paragraph, benefits, process/how it works, service area, testimonials or case studies, clear call to action.'],
+                ],
+                'tasks' => [
+                    ['text' => 'Create a new page dedicated to this service', 'type' => 'manual'],
+                    ['text' => 'Use the service name in the page title and H1', 'type' => 'manual'],
+                    ['text' => 'Write at least 300 words of unique, helpful content', 'type' => 'manual'],
+                    ['text' => 'Add the page to your site navigation and link to it from the homepage', 'type' => 'manual'],
                 ],
             ],
 
