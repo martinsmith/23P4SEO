@@ -46,6 +46,24 @@ interface Competitor {
     label: string | null;
 }
 
+interface KeywordSnapshot {
+    checked_at: string;
+    position: number | null;
+    found: boolean;
+    result_url: string | null;
+    top_competitors: string[];
+    previous_position: number | null;
+}
+
+interface TrackedKeyword {
+    id: number;
+    keyword: string;
+    intent_type: string;
+    location_name: string | null;
+    target_url: string | null;
+    latest_snapshot: KeywordSnapshot | null;
+}
+
 const props = defineProps<{
     site: { id: number; display_name: string; primary_url: string; normalized_domain: string };
     latestScan: Scan | null;
@@ -53,6 +71,8 @@ const props = defineProps<{
     businessProfile: BusinessProfile | null;
     businessServices: BusinessService[];
     competitors: Competitor[];
+    trackedKeywords: TrackedKeyword[];
+    serperConfigured: boolean;
 }>();
 
 const activeTab = ref('visibility');
@@ -75,6 +95,7 @@ const businessSubTabs = [
     { key: 'profile',       label: 'Profile',       categories: [] as string[] },
     { key: 'content',       label: 'Content',       categories: ['content'] },
     { key: 'localisation',  label: 'Localisation',  categories: ['local_seo'] },
+    { key: 'keywords',      label: 'Keywords',      categories: [] as string[] },
     { key: 'competitors',   label: 'Competitors',   categories: [] as string[] },
     { key: 'misc',          label: 'Misc',          categories: [] as string[] },
 ] as const;
@@ -226,6 +247,111 @@ function saveCompetitors() {
         preserveScroll: true,
         onFinish: () => { competitorsSaving.value = false; flash(competitorsSaved); },
     });
+}
+
+/* ── Keywords state ── */
+const newKeyword = ref('');
+const addingKeyword = ref(false);
+const suggestions = ref<{ keyword: string; intent_type: string; source: string }[]>([]);
+const loadingSuggestions = ref(false);
+const checkingKeyword = ref<number | null>(null);
+const checkingAll = ref(false);
+const keywordResult = ref<{ keyword_id: number; status: string; meaning: string } | null>(null);
+
+function addKeyword() {
+    if (!newKeyword.value.trim()) return;
+    addingKeyword.value = true;
+    router.post(`/sites/${props.site.id}/keywords`, {
+        keyword: newKeyword.value.trim(),
+    }, {
+        preserveScroll: true,
+        onFinish: () => { addingKeyword.value = false; newKeyword.value = ''; },
+    });
+}
+
+function removeKeyword(kwId: number) {
+    router.delete(`/sites/${props.site.id}/keywords/${kwId}`, { preserveScroll: true });
+}
+
+async function loadSuggestions() {
+    loadingSuggestions.value = true;
+    try {
+        const res = await fetch(`/sites/${props.site.id}/keywords/suggestions`);
+        const data = await res.json();
+        suggestions.value = data.suggestions || [];
+    } catch { suggestions.value = []; }
+    loadingSuggestions.value = false;
+}
+
+function addSuggested(s: { keyword: string; intent_type: string }) {
+    router.post(`/sites/${props.site.id}/keywords`, {
+        keyword: s.keyword,
+        intent_type: s.intent_type,
+    }, { preserveScroll: true, onSuccess: () => {
+        suggestions.value = suggestions.value.filter(x => x.keyword !== s.keyword);
+    }});
+}
+
+function addAllSuggested() {
+    const toAdd = suggestions.value.map(s => ({ keyword: s.keyword, intent_type: s.intent_type }));
+    router.post(`/sites/${props.site.id}/keywords/bulk`, { keywords: toAdd }, {
+        preserveScroll: true,
+        onSuccess: () => { suggestions.value = []; },
+    });
+}
+
+async function checkKeywordRanking(kwId: number) {
+    checkingKeyword.value = kwId;
+    keywordResult.value = null;
+    try {
+        const res = await fetch(`/sites/${props.site.id}/keywords/${kwId}/check`, { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '', 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (data.error) { alert(data.error); }
+        else { keywordResult.value = data; }
+    } catch (e) { alert('Failed to check ranking'); }
+    checkingKeyword.value = null;
+    // Refresh page data
+    router.reload({ only: ['trackedKeywords'], preserveScroll: true });
+}
+
+function checkAllRankings() {
+    checkingAll.value = true;
+    router.post(`/sites/${props.site.id}/keywords/check-all`, {}, {
+        preserveScroll: true,
+        onFinish: () => { checkingAll.value = false; },
+    });
+}
+
+function rankingStatusText(kw: TrackedKeyword): string {
+    const s = kw.latest_snapshot;
+    if (!s) return 'Not checked yet';
+    if (!s.found) return 'Not found in top 50';
+    let text = `#${s.position}`;
+    if (s.previous_position !== null && s.previous_position !== undefined) {
+        const diff = s.previous_position - (s.position ?? 0);
+        if (diff > 0) text += ` ↑${diff}`;
+        else if (diff < 0) text += ` ↓${Math.abs(diff)}`;
+    }
+    return text;
+}
+
+function rankingMeaning(kw: TrackedKeyword): string {
+    const s = kw.latest_snapshot;
+    if (!s) return 'Check this keyword to see where you rank.';
+    if (!s.found) return 'Your site does not appear in the first 50 results for this search.';
+    if ((s.position ?? 99) <= 3) return 'Excellent — top 3 visibility. Maintain your position.';
+    if ((s.position ?? 99) <= 10) return 'Page 1 — strong visibility. Small tweaks could push you higher.';
+    if ((s.position ?? 99) <= 20) return 'Close to page 1 — a strong opportunity to improve.';
+    return 'Limited visibility. Dedicated content could help.';
+}
+
+function rankingClass(kw: TrackedKeyword): string {
+    const s = kw.latest_snapshot;
+    if (!s || !s.found) return 'kw-rank--none';
+    if ((s.position ?? 99) <= 3) return 'kw-rank--top';
+    if ((s.position ?? 99) <= 10) return 'kw-rank--page1';
+    if ((s.position ?? 99) <= 20) return 'kw-rank--close';
+    return 'kw-rank--far';
 }
 </script>
 
@@ -545,6 +671,79 @@ function saveCompetitors() {
                     </div>
                 </div>
 
+                <!-- ── Keywords sub-tab ── -->
+                <div v-show="businessSubTab === 'keywords'">
+                    <div v-if="!serperConfigured" class="card missions-index__empty">
+                        <p class="missions-index__empty-text">🔑 Search ranking API is not configured. Add your <code>SERPER_API_KEY</code> in <code>.env</code> to enable keyword tracking.</p>
+                    </div>
+                    <template v-else>
+                        <!-- Add keyword -->
+                        <div class="card kw-add">
+                            <h3 class="biz-form__title">Track a Keyword</h3>
+                            <form class="kw-add__form" @submit.prevent="addKeyword">
+                                <input v-model="newKeyword" type="text" class="biz-field__input kw-add__input" placeholder="e.g. Lift Engineers Manchester" />
+                                <button type="submit" class="btn btn--primary btn--sm" :disabled="addingKeyword || !newKeyword.trim()">
+                                    {{ addingKeyword ? 'Adding…' : 'Add Keyword' }}
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Suggestions -->
+                        <div class="card kw-suggestions">
+                            <div class="kw-suggestions__header">
+                                <h3 class="biz-form__title">Suggested Keywords</h3>
+                                <button class="btn btn--secondary btn--sm" :disabled="loadingSuggestions" @click="loadSuggestions">
+                                    {{ loadingSuggestions ? 'Loading…' : 'Get Suggestions' }}
+                                </button>
+                            </div>
+                            <p class="biz-form__hint">Based on your services, location, and competitors.</p>
+                            <div v-if="suggestions.length > 0" class="kw-suggestions__list">
+                                <div v-for="s in suggestions" :key="s.keyword" class="kw-suggestion">
+                                    <div class="kw-suggestion__info">
+                                        <span class="kw-suggestion__keyword">{{ s.keyword }}</span>
+                                        <span class="kw-suggestion__source tag tag--neutral">{{ s.source }}</span>
+                                    </div>
+                                    <button class="btn btn--primary btn--xs" @click="addSuggested(s)">+ Track</button>
+                                </div>
+                                <button class="btn btn--secondary btn--sm kw-suggestions__add-all" @click="addAllSuggested">Track All Suggestions</button>
+                            </div>
+                            <p v-else-if="!loadingSuggestions" class="kw-suggestions__empty">Click "Get Suggestions" to generate keyword ideas from your business profile.</p>
+                        </div>
+
+                        <!-- Tracked keywords list -->
+                        <div v-if="trackedKeywords.length > 0" class="card kw-tracked">
+                            <div class="kw-tracked__header">
+                                <h3 class="biz-form__title">Your Tracked Keywords</h3>
+                                <button class="btn btn--secondary btn--sm" :disabled="checkingAll" @click="checkAllRankings">
+                                    {{ checkingAll ? 'Checking…' : 'Check All Rankings' }}
+                                </button>
+                            </div>
+
+                            <div class="kw-list">
+                                <div v-for="kw in trackedKeywords" :key="kw.id" class="kw-item">
+                                    <div class="kw-item__main">
+                                        <div class="kw-item__keyword">{{ kw.keyword }}</div>
+                                        <div :class="['kw-item__rank', rankingClass(kw)]">
+                                            {{ rankingStatusText(kw) }}
+                                        </div>
+                                    </div>
+                                    <p class="kw-item__meaning">{{ rankingMeaning(kw) }}</p>
+                                    <div v-if="kw.latest_snapshot && kw.latest_snapshot.top_competitors && kw.latest_snapshot.top_competitors.length > 0" class="kw-item__competitors">
+                                        <span class="kw-item__comp-label">Also ranking:</span>
+                                        <span v-for="comp in kw.latest_snapshot.top_competitors.slice(0, 3)" :key="comp" class="tag tag--neutral kw-item__comp-tag">{{ comp }}</span>
+                                    </div>
+                                    <div class="kw-item__actions">
+                                        <button class="btn btn--secondary btn--xs" :disabled="checkingKeyword === kw.id" @click="checkKeywordRanking(kw.id)">
+                                            {{ checkingKeyword === kw.id ? 'Checking…' : 'Check Now' }}
+                                        </button>
+                                        <button class="kw-item__remove" @click="removeKeyword(kw.id)" title="Remove keyword">×</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
                 <!-- ── Competitors sub-tab ── -->
                 <div v-show="businessSubTab === 'competitors'">
                     <form class="card biz-form" @submit.prevent="saveCompetitors">
@@ -861,5 +1060,61 @@ function saveCompetitors() {
     animation: fade-in 0.3s ease;
 }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ═══ Keywords sub-tab ═══ */
+.kw-add { margin-bottom: var(--space-lg); }
+.kw-add__form { display: flex; gap: var(--space-sm); align-items: center; }
+.kw-add__input { flex: 1; }
+
+.kw-suggestions { margin-bottom: var(--space-lg); }
+.kw-suggestions__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-xs); }
+.kw-suggestions__list { margin-top: var(--space-md); display: flex; flex-direction: column; gap: var(--space-sm); }
+.kw-suggestions__empty { font-size: 13px; color: var(--color-text-faint); margin-top: var(--space-sm); }
+.kw-suggestions__add-all { margin-top: var(--space-md); align-self: flex-start; }
+
+.kw-suggestion {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: oklch(97% 0.005 253); border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+}
+.kw-suggestion__info { display: flex; align-items: center; gap: var(--space-sm); }
+.kw-suggestion__keyword { font-size: 14px; font-weight: 600; color: var(--color-text); }
+.kw-suggestion__source { font-size: 11px; }
+
+.kw-tracked { margin-bottom: var(--space-lg); }
+.kw-tracked__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md); }
+
+.kw-list { display: flex; flex-direction: column; gap: var(--space-md); }
+
+.kw-item {
+    padding: var(--space-md); background: oklch(98% 0.006 253);
+    border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+}
+.kw-item__main { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.kw-item__keyword { font-size: 15px; font-weight: 700; color: var(--color-text); }
+.kw-item__rank {
+    font-size: 14px; font-weight: 700; padding: 4px 12px;
+    border-radius: var(--radius-sm);
+}
+.kw-rank--none { background: oklch(92% 0.01 253); color: var(--color-text-muted); }
+.kw-rank--top { background: oklch(88% 0.12 145); color: oklch(30% 0.12 145); }
+.kw-rank--page1 { background: oklch(90% 0.10 198); color: oklch(30% 0.12 198); }
+.kw-rank--close { background: oklch(90% 0.06 70); color: oklch(42% 0.10 70); }
+.kw-rank--far { background: oklch(88% 0.06 27); color: oklch(42% 0.16 27); }
+
+.kw-item__meaning { font-size: 13px; color: var(--color-text-muted); line-height: 1.6; margin: 0 0 8px; }
+.kw-item__competitors { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.kw-item__comp-label { font-size: 12px; color: var(--color-text-faint); font-weight: 600; }
+.kw-item__comp-tag { font-size: 11px; }
+
+.kw-item__actions { display: flex; align-items: center; gap: var(--space-sm); }
+.kw-item__remove {
+    width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--color-border);
+    background: none; color: var(--color-text-muted); font-size: 14px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.kw-item__remove:hover { background: oklch(95% 0.04 27); color: oklch(55% 0.15 25); }
+
+.btn--xs { padding: 4px 10px; font-size: 12px; }
 </style>
 

@@ -42,6 +42,37 @@ class MissionController extends Controller
         $businessServices = $site->businessServices()->orderBy('priority_order')->get();
         $competitors = $site->competitors()->where('active', true)->get();
 
+        $trackedKeywords = $site->trackedKeywords()
+            ->where('status', 'active')
+            ->with('latestSnapshot')
+            ->orderBy('priority_order')
+            ->get()
+            ->map(function ($kw) {
+                $snapshot = $kw->latestSnapshot;
+                $previous = $snapshot
+                    ? $kw->snapshots()->where('id', '!=', $snapshot->id)->orderByDesc('checked_at')->first()
+                    : null;
+
+                return [
+                    'id' => $kw->id,
+                    'keyword' => $kw->keyword,
+                    'intent_type' => $kw->intent_type,
+                    'location_name' => $kw->location_name,
+                    'target_url' => $kw->target_url,
+                    'latest_snapshot' => $snapshot ? [
+                        'checked_at' => $snapshot->checked_at->toDateTimeString(),
+                        'position' => $snapshot->ranking_position,
+                        'found' => $snapshot->found_in_results,
+                        'result_url' => $snapshot->result_url,
+                        'top_competitors' => $snapshot->top_competitor_domains_json ?? [],
+                        'previous_position' => $previous?->ranking_position,
+                    ] : null,
+                ];
+            });
+
+        $serperConfigured = config('services.serper.api_key') !== null
+            && config('services.serper.api_key') !== '';
+
         return Inertia::render('Missions/Index', [
             'site' => $site,
             'latestScan' => $latestScan,
@@ -49,6 +80,8 @@ class MissionController extends Controller
             'businessProfile' => $businessProfile,
             'businessServices' => $businessServices,
             'competitors' => $competitors,
+            'trackedKeywords' => $trackedKeywords,
+            'serperConfigured' => $serperConfigured,
         ]);
     }
 

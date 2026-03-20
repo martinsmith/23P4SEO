@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\BusinessProfileController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\KeywordController;
 use App\Http\Controllers\MissionController;
 use App\Http\Controllers\ScanController;
 use App\Http\Controllers\SiteController;
@@ -26,3 +27,10 @@ Route::post('/sites/{site}/generate-sitemap', [MissionController::class, 'genera
 Route::put('/sites/{site}/business-profile', [BusinessProfileController::class, 'update'])->name('business-profile.update');
 Route::put('/sites/{site}/business-services', [BusinessProfileController::class, 'updateServices'])->name('business-services.update');
 Route::put('/sites/{site}/business-competitors', [BusinessProfileController::class, 'updateCompetitors'])->name('business-competitors.update');
+
+Route::post('/sites/{site}/keywords', [KeywordController::class, 'store'])->name('keywords.store');
+Route::post('/sites/{site}/keywords/bulk', [KeywordController::class, 'bulkStore'])->name('keywords.bulk-store');
+Route::delete('/sites/{site}/keywords/{keyword}', [KeywordController::class, 'destroy'])->name('keywords.destroy');
+Route::get('/sites/{site}/keywords/suggestions', [KeywordController::class, 'suggestions'])->name('keywords.suggestions');
+Route::post('/sites/{site}/keywords/{keyword}/check', [KeywordController::class, 'checkRanking'])->name('keywords.check');
+Route::post('/sites/{site}/keywords/check-all', [KeywordController::class, 'checkAllRankings'])->name('keywords.check-all');
