@@ -12,6 +12,7 @@ class Mission extends Model
         'site_id',
         'source_scan_id',
         'source_type',
+        'source_finding_title',
         'category',
         'status',
         'priority_score',

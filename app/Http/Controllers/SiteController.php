@@ -10,16 +10,6 @@ use Inertia\Inertia;
 
 class SiteController extends Controller
 {
-    public function index()
-    {
-        $account = Account::first();
-        $sites = $account->sites()->latest()->get();
-
-        return Inertia::render('Sites/Index', [
-            'sites' => $sites,
-        ]);
-    }
-
     public function create()
     {
         return Inertia::render('Sites/Create');
@@ -51,17 +41,14 @@ class SiteController extends Controller
             'lifecycle_status' => 'setup',
         ]);
 
-        return redirect()->route('sites.show', $site);
+        return redirect()->route('missions.index', $site);
     }
 
-    public function show(Site $site)
+    public function destroy(Site $site)
     {
-        $latestScan = $site->scans()->latest()->first();
+        $site->delete();
 
-        return Inertia::render('Sites/Show', [
-            'site' => $site,
-            'latestScan' => $latestScan,
-        ]);
+        return redirect()->route('dashboard')->with('message', 'Site deleted successfully.');
     }
 }
 

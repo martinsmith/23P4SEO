@@ -8,7 +8,7 @@ import { Link } from '@inertiajs/vue3';
             <div class="app-header__inner">
                 <Link href="/" class="app-logo">23P4</Link>
                 <nav class="app-nav">
-                    <Link href="/sites" class="app-nav__link">Sites</Link>
+                    <Link href="/" class="app-nav__link">Dashboard</Link>
                 </nav>
             </div>
         </header>

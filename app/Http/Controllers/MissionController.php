@@ -12,6 +12,8 @@ class MissionController extends Controller
 {
     public function index(Site $site)
     {
+        $latestScan = $site->scans()->latest()->first();
+
         $missions = $site->missions()
             ->with('tasks')
             ->orderByDesc('priority_score')
@@ -29,6 +31,7 @@ class MissionController extends Controller
                     'effort_level' => $mission->effort_level,
                     'outcome_statement' => $mission->outcome_statement,
                     'user_summary' => $mission->user_summary,
+                    'source_finding_title' => $mission->source_finding_title,
                     'total_tasks' => $totalTasks,
                     'completed_tasks' => $completedTasks,
                     'created_at' => $mission->created_at->toDateTimeString(),
@@ -37,6 +40,7 @@ class MissionController extends Controller
 
         return Inertia::render('Missions/Index', [
             'site' => $site,
+            'latestScan' => $latestScan,
             'missions' => $missions,
         ]);
     }

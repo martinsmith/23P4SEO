@@ -279,8 +279,8 @@ const progressPct = totalCount > 0 ? (completedCount / totalCount * 100) : 0;
                 <div class="mission-show__complete-icon">🎉</div>
                 <h3>Mission Complete!</h3>
                 <p>All tasks have been finished. Run a new scan to validate the changes.</p>
-                <Link :href="`/sites/${site.id}`" class="btn btn--accent">
-                    Back to Site <span class="arrow">→</span>
+                <Link :href="`/sites/${site.id}/missions`" class="btn btn--accent">
+                    Back to Missions <span class="arrow">→</span>
                 </Link>
             </div>
         </div>

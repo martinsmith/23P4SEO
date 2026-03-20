@@ -27,6 +27,19 @@ class TaskVerifier
             'homepage_has_h1' => $this->checkHomepageHasH1($site),
             'homepage_uses_https' => $this->checkHomepageUsesHttps($site),
             'homepage_returns_200' => $this->checkHomepageReturns200($site),
+            // Meta/OG checks
+            'has_og_title' => $this->checkHasMetaProperty($site, 'og:title', 'og:title'),
+            'has_og_description' => $this->checkHasMetaProperty($site, 'og:description', 'og:description'),
+            'has_og_image' => $this->checkHasMetaProperty($site, 'og:image', 'og:image'),
+            'has_twitter_card' => $this->checkHasMetaName($site, 'twitter:card', 'twitter:card'),
+            // Technical checks
+            'has_canonical' => $this->checkHasCanonical($site),
+            'has_structured_data' => $this->checkHasStructuredData($site),
+            'has_html_lang' => $this->checkHasHtmlLang($site),
+            'has_viewport' => $this->checkHasMetaName($site, 'viewport', 'viewport'),
+            'has_charset' => $this->checkHasCharset($site),
+            // Security checks
+            'has_x_content_type_options' => $this->checkHasXContentTypeOptions($site),
             default => ['passed' => false, 'message' => "Unknown check: {$checkName}", 'evidence' => []],
         };
     }
@@ -203,5 +216,102 @@ class TaskVerifier
         return $h['status'] === 200
             ? ['passed' => true, 'message' => 'Homepage returns HTTP 200', 'evidence' => []]
             : ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => ['status' => $h['status']]];
+    }
+
+    // --- Meta/OG checks ---
+
+    protected function checkHasMetaProperty(Site $site, string $property, string $label): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+        $pattern = '/<meta\s+[^>]*property=["\']' . preg_quote($property, '/') . '["\'][^>]*content=["\']([^"\']*)["\'][^>]*>/i';
+        if (preg_match($pattern, $h['body'], $m) && trim($m[1]) !== '') {
+            return ['passed' => true, 'message' => "{$label} found: \"{$m[1]}\"", 'evidence' => ['value' => $m[1]]];
+        }
+        // Try reverse order
+        $pattern = '/<meta\s+[^>]*content=["\']([^"\']*)["\'][^>]*property=["\']' . preg_quote($property, '/') . '["\'][^>]*>/i';
+        if (preg_match($pattern, $h['body'], $m) && trim($m[1]) !== '') {
+            return ['passed' => true, 'message' => "{$label} found: \"{$m[1]}\"", 'evidence' => ['value' => $m[1]]];
+        }
+        return ['passed' => false, 'message' => "No {$label} meta tag found", 'evidence' => []];
+    }
+
+    protected function checkHasMetaName(Site $site, string $name, string $label): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+        $pattern = '/<meta[^>]+name=["\']' . preg_quote($name, '/') . '["\'][^>]*>/i';
+        if (preg_match($pattern, $h['body'])) {
+            return ['passed' => true, 'message' => "{$label} meta tag found", 'evidence' => []];
+        }
+        return ['passed' => false, 'message' => "No {$label} meta tag found", 'evidence' => []];
+    }
+
+    // --- Technical checks ---
+
+    protected function checkHasCanonical(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+        if (preg_match('/<link[^>]+rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\'][^>]*>/i', $h['body'], $m)
+            || preg_match('/<link[^>]+href=["\']([^"\']+)["\'][^>]*rel=["\']canonical["\'][^>]*>/i', $h['body'], $m)) {
+            return ['passed' => true, 'message' => "Canonical URL: {$m[1]}", 'evidence' => ['canonical' => $m[1]]];
+        }
+        return ['passed' => false, 'message' => 'No canonical link tag found', 'evidence' => []];
+    }
+
+    protected function checkHasStructuredData(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+        if (preg_match('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>/i', $h['body'])) {
+            return ['passed' => true, 'message' => 'JSON-LD structured data found', 'evidence' => []];
+        }
+        return ['passed' => false, 'message' => 'No JSON-LD structured data found', 'evidence' => []];
+    }
+
+    protected function checkHasHtmlLang(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+        if (preg_match('/<html[^>]+lang=["\']([^"\']+)["\'][^>]*>/i', $h['body'], $m)) {
+            return ['passed' => true, 'message' => "HTML lang attribute: \"{$m[1]}\"", 'evidence' => ['lang' => $m[1]]];
+        }
+        return ['passed' => false, 'message' => 'No lang attribute on <html> tag', 'evidence' => []];
+    }
+
+    protected function checkHasCharset(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+        if (preg_match('/<meta[^>]+charset=["\']?[^"\'>\s]+/i', $h['body'])
+            || preg_match('/<meta[^>]+http-equiv=["\']Content-Type["\'][^>]*>/i', $h['body'])) {
+            return ['passed' => true, 'message' => 'Character encoding declared', 'evidence' => []];
+        }
+        return ['passed' => false, 'message' => 'No charset declaration found', 'evidence' => []];
+    }
+
+    // --- Security checks ---
+
+    protected function checkHasXContentTypeOptions(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        $header = $h['headers']['X-Content-Type-Options'][0] ?? $h['headers']['x-content-type-options'][0] ?? null;
+        if ($header && strtolower($header) === 'nosniff') {
+            return ['passed' => true, 'message' => 'X-Content-Type-Options: nosniff header present', 'evidence' => []];
+        }
+        return ['passed' => false, 'message' => 'X-Content-Type-Options header missing or not set to nosniff', 'evidence' => []];
     }
 }
