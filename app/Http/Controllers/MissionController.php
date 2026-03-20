@@ -38,10 +38,17 @@ class MissionController extends Controller
                 ];
             });
 
+        $businessProfile = $site->businessProfile;
+        $businessServices = $site->businessServices()->orderBy('priority_order')->get();
+        $competitors = $site->competitors()->where('active', true)->get();
+
         return Inertia::render('Missions/Index', [
             'site' => $site,
             'latestScan' => $latestScan,
             'missions' => $missions,
+            'businessProfile' => $businessProfile,
+            'businessServices' => $businessServices,
+            'competitors' => $competitors,
         ]);
     }
 

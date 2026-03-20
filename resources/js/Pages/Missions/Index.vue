@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, reactive } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
@@ -24,18 +24,73 @@ interface Scan {
     completed_at: string | null;
 }
 
+interface BusinessProfile {
+    id?: number;
+    business_name: string | null;
+    business_type: string | null;
+    service_model: string | null;
+    description: string | null;
+    primary_location: string | null;
+    service_area_summary: string | null;
+    target_customer_summary: string | null;
+}
+
+interface BusinessService {
+    id?: number;
+    service_name: string;
+}
+
+interface Competitor {
+    id?: number;
+    domain: string;
+    label: string | null;
+}
+
 const props = defineProps<{
     site: { id: number; display_name: string; primary_url: string; normalized_domain: string };
     latestScan: Scan | null;
     missions: Mission[];
+    businessProfile: BusinessProfile | null;
+    businessServices: BusinessService[];
+    competitors: Competitor[];
 }>();
 
+const activeTab = ref('visibility');
 const scanning = ref(false);
 const showDeleteModal = ref(false);
 const deleting = ref(false);
 
 const activeMissions = props.missions.filter(m => m.status !== 'completed');
 const completedMissions = props.missions.filter(m => m.status === 'completed');
+
+/* ── Business Context form state ── */
+const profileForm = reactive({
+    business_name: props.businessProfile?.business_name ?? '',
+    business_type: props.businessProfile?.business_type ?? '',
+    service_model: props.businessProfile?.service_model ?? '',
+    description: props.businessProfile?.description ?? '',
+    primary_location: props.businessProfile?.primary_location ?? '',
+    service_area_summary: props.businessProfile?.service_area_summary ?? '',
+    target_customer_summary: props.businessProfile?.target_customer_summary ?? '',
+});
+const profileSaving = ref(false);
+const profileSaved = ref(false);
+
+const servicesForm = reactive({
+    services: props.businessServices.length > 0
+        ? props.businessServices.map(s => ({ service_name: s.service_name }))
+        : [{ service_name: '' }],
+});
+const servicesSaving = ref(false);
+const servicesSaved = ref(false);
+
+const competitorsForm = reactive({
+    competitors: props.competitors.length > 0
+        ? props.competitors.map(c => ({ domain: c.domain, label: c.label ?? '' }))
+        : [{ domain: '', label: '' }],
+});
+const competitorsSaving = ref(false);
+const competitorsSaved = ref(false);
 
 function runScan() {
     scanning.value = true;
@@ -80,6 +135,42 @@ function statusClass(status: string): string {
     if (status === 'active' || status === 'in_progress') return 'tag--info';
     return 'tag--neutral';
 }
+
+/* ── Business Context actions ── */
+function flash(flag: { value: boolean }) {
+    flag.value = true;
+    setTimeout(() => { flag.value = false; }, 2500);
+}
+
+function saveProfile() {
+    profileSaving.value = true;
+    router.put(`/sites/${props.site.id}/business-profile`, { ...profileForm }, {
+        preserveScroll: true,
+        onFinish: () => { profileSaving.value = false; flash(profileSaved); },
+    });
+}
+
+function addService() { servicesForm.services.push({ service_name: '' }); }
+function removeService(i: number) { servicesForm.services.splice(i, 1); }
+
+function saveServices() {
+    servicesSaving.value = true;
+    router.put(`/sites/${props.site.id}/business-services`, { services: servicesForm.services }, {
+        preserveScroll: true,
+        onFinish: () => { servicesSaving.value = false; flash(servicesSaved); },
+    });
+}
+
+function addCompetitor() { competitorsForm.competitors.push({ domain: '', label: '' }); }
+function removeCompetitor(i: number) { competitorsForm.competitors.splice(i, 1); }
+
+function saveCompetitors() {
+    competitorsSaving.value = true;
+    router.put(`/sites/${props.site.id}/business-competitors`, { competitors: competitorsForm.competitors }, {
+        preserveScroll: true,
+        onFinish: () => { competitorsSaving.value = false; flash(competitorsSaved); },
+    });
+}
 </script>
 
 <template>
@@ -105,92 +196,196 @@ function statusClass(status: string): string {
                 </div>
             </div>
 
-            <!-- No scan yet -->
-            <div v-if="!latestScan" class="card missions-index__empty">
-                <h2 class="missions-index__empty-title">Ready to scan</h2>
-                <p class="missions-index__empty-text">
-                    Your site has been added. Run your first scan to discover
-                    what's working and generate your missions.
-                </p>
-                <button class="btn btn--primary" :disabled="scanning" @click="runScan">
-                    {{ scanning ? 'Scanning…' : 'Run First Scan' }}
-                </button>
-            </div>
+            <!-- Tab bar -->
+            <nav class="tab-bar">
+                <button
+                    :class="['tab-bar__tab', { 'tab-bar__tab--active': activeTab === 'visibility' }]"
+                    @click="activeTab = 'visibility'"
+                >Visibility</button>
+                <button
+                    :class="['tab-bar__tab', { 'tab-bar__tab--active': activeTab === 'business' }]"
+                    @click="activeTab = 'business'"
+                >Business Context</button>
+            </nav>
 
-            <!-- Scanned but no missions at all -->
-            <div v-else-if="missions.length === 0" class="card missions-index__empty">
-                <p class="missions-index__empty-text">✅ No issues found — your site looks good!</p>
-            </div>
+            <!-- ═══ TAB: Visibility ═══ -->
+            <div v-show="activeTab === 'visibility'">
+                <!-- No scan yet -->
+                <div v-if="!latestScan" class="card missions-index__empty">
+                    <h2 class="missions-index__empty-title">Ready to scan</h2>
+                    <p class="missions-index__empty-text">
+                        Your site has been added. Run your first scan to discover
+                        what's working and generate your missions.
+                    </p>
+                    <button class="btn btn--primary" :disabled="scanning" @click="runScan">
+                        {{ scanning ? 'Scanning…' : 'Run First Scan' }}
+                    </button>
+                </div>
 
-            <template v-else>
-                <!-- Active missions -->
-                <div v-if="activeMissions.length > 0" class="missions-section">
-                    <h2 class="missions-section__title">To Do <span class="missions-section__count">{{ activeMissions.length }}</span></h2>
-                    <div class="missions-grid">
-                        <Link
-                            v-for="mission in activeMissions"
-                            :key="mission.id"
-                            :href="`/sites/${site.id}/missions/${mission.id}`"
-                            class="card card--interactive mission-card"
-                        >
-                            <div class="mission-card__header">
-                                <span :class="['tag', priorityClass(mission.priority_score)]">
-                                    {{ priorityLabel(mission.priority_score) }}
-                                </span>
-                                <span :class="['tag', statusClass(mission.status)]">
-                                    {{ statusLabel(mission.status) }}
-                                </span>
-                            </div>
+                <!-- Scanned but no missions at all -->
+                <div v-else-if="missions.length === 0" class="card missions-index__empty">
+                    <p class="missions-index__empty-text">✅ No issues found — your site looks good!</p>
+                </div>
 
-                            <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
-                            <p class="mission-card__summary">{{ mission.user_summary }}</p>
-
-                            <div class="mission-card__footer">
-                                <div class="mission-card__progress">
-                                    <div class="mission-card__progress-bar">
-                                        <div
-                                            class="mission-card__progress-fill"
-                                            :style="{ width: mission.total_tasks > 0 ? (mission.completed_tasks / mission.total_tasks * 100) + '%' : '0%' }"
-                                        ></div>
-                                    </div>
-                                    <span class="mission-card__progress-text">
-                                        {{ mission.completed_tasks }}/{{ mission.total_tasks }} tasks
+                <template v-else>
+                    <!-- Active missions -->
+                    <div v-if="activeMissions.length > 0" class="missions-section">
+                        <h2 class="missions-section__title">To Do <span class="missions-section__count">{{ activeMissions.length }}</span></h2>
+                        <div class="missions-grid">
+                            <Link
+                                v-for="mission in activeMissions"
+                                :key="mission.id"
+                                :href="`/sites/${site.id}/missions/${mission.id}`"
+                                class="card card--interactive mission-card"
+                            >
+                                <div class="mission-card__header">
+                                    <span :class="['tag', priorityClass(mission.priority_score)]">
+                                        {{ priorityLabel(mission.priority_score) }}
+                                    </span>
+                                    <span :class="['tag', statusClass(mission.status)]">
+                                        {{ statusLabel(mission.status) }}
                                     </span>
                                 </div>
-                                <span class="mission-card__category">{{ mission.category }}</span>
-                            </div>
-                        </Link>
+
+                                <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
+                                <p class="mission-card__summary">{{ mission.user_summary }}</p>
+
+                                <div class="mission-card__footer">
+                                    <div class="mission-card__progress">
+                                        <div class="mission-card__progress-bar">
+                                            <div
+                                                class="mission-card__progress-fill"
+                                                :style="{ width: mission.total_tasks > 0 ? (mission.completed_tasks / mission.total_tasks * 100) + '%' : '0%' }"
+                                            ></div>
+                                        </div>
+                                        <span class="mission-card__progress-text">
+                                            {{ mission.completed_tasks }}/{{ mission.total_tasks }} tasks
+                                        </span>
+                                    </div>
+                                    <span class="mission-card__category">{{ mission.category }}</span>
+                                </div>
+                            </Link>
+                        </div>
                     </div>
-                </div>
 
-                <!-- No active missions but completed exist -->
-                <div v-else class="card missions-index__empty">
-                    <p class="missions-index__empty-text">✅ All missions completed — your site is in great shape!</p>
-                </div>
-
-                <!-- Divider -->
-                <hr v-if="activeMissions.length > 0 && completedMissions.length > 0" class="missions-divider" />
-
-                <!-- Completed missions -->
-                <div v-if="completedMissions.length > 0" class="missions-section">
-                    <h2 class="missions-section__title">Completed <span class="missions-section__count">{{ completedMissions.length }}</span></h2>
-                    <div class="missions-grid">
-                        <Link
-                            v-for="mission in completedMissions"
-                            :key="mission.id"
-                            :href="`/sites/${site.id}/missions/${mission.id}`"
-                            class="card card--interactive mission-card mission-card--completed"
-                        >
-                            <div class="mission-card__header">
-                                <span class="tag tag--passed">✓ Passed</span>
-                                <span class="mission-card__category">{{ mission.category }}</span>
-                            </div>
-                            <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
-                            <p class="mission-card__summary">{{ mission.user_summary }}</p>
-                        </Link>
+                    <!-- No active missions but completed exist -->
+                    <div v-else class="card missions-index__empty">
+                        <p class="missions-index__empty-text">✅ All missions completed — your site is in great shape!</p>
                     </div>
-                </div>
-            </template>
+
+                    <!-- Divider -->
+                    <hr v-if="activeMissions.length > 0 && completedMissions.length > 0" class="missions-divider" />
+
+                    <!-- Completed missions -->
+                    <div v-if="completedMissions.length > 0" class="missions-section">
+                        <h2 class="missions-section__title">Completed <span class="missions-section__count">{{ completedMissions.length }}</span></h2>
+                        <div class="missions-grid">
+                            <Link
+                                v-for="mission in completedMissions"
+                                :key="mission.id"
+                                :href="`/sites/${site.id}/missions/${mission.id}`"
+                                class="card card--interactive mission-card mission-card--completed"
+                            >
+                                <div class="mission-card__header">
+                                    <span class="tag tag--passed">✓ Passed</span>
+                                    <span class="mission-card__category">{{ mission.category }}</span>
+                                </div>
+                                <h3 class="mission-card__finding">{{ mission.source_finding_title || mission.outcome_statement }}</h3>
+                                <p class="mission-card__summary">{{ mission.user_summary }}</p>
+                            </Link>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- ═══ TAB: Business Context ═══ -->
+            <div v-show="activeTab === 'business'" class="biz-context">
+                <p class="biz-context__intro">
+                    Tell us about your business so we can tailor missions to your sector, location, and competitive landscape.
+                </p>
+
+                <!-- Business Profile -->
+                <form class="card biz-form" @submit.prevent="saveProfile">
+                    <h3 class="biz-form__title">About Your Business</h3>
+                    <div class="biz-form__grid">
+                        <label class="biz-field">
+                            <span class="biz-field__label">Business Name</span>
+                            <input v-model="profileForm.business_name" type="text" class="biz-field__input" placeholder="e.g. Smith & Co Plumbing" />
+                        </label>
+                        <label class="biz-field">
+                            <span class="biz-field__label">Business Type / Sector</span>
+                            <input v-model="profileForm.business_type" type="text" class="biz-field__input" placeholder="e.g. Plumber, Bakery, Solicitor" />
+                        </label>
+                        <label class="biz-field">
+                            <span class="biz-field__label">Service Model</span>
+                            <select v-model="profileForm.service_model" class="biz-field__input">
+                                <option value="">Select…</option>
+                                <option value="local">Local (serves a specific area)</option>
+                                <option value="national">National</option>
+                                <option value="online">Online / E-commerce</option>
+                                <option value="hybrid">Hybrid (local + online)</option>
+                            </select>
+                        </label>
+                        <label class="biz-field">
+                            <span class="biz-field__label">Primary Location</span>
+                            <input v-model="profileForm.primary_location" type="text" class="biz-field__input" placeholder="e.g. Manchester, UK" />
+                        </label>
+                    </div>
+                    <label class="biz-field">
+                        <span class="biz-field__label">Short Description</span>
+                        <textarea v-model="profileForm.description" class="biz-field__textarea" rows="2" placeholder="What does your business do in one or two sentences?"></textarea>
+                    </label>
+                    <label class="biz-field">
+                        <span class="biz-field__label">Service Area</span>
+                        <input v-model="profileForm.service_area_summary" type="text" class="biz-field__input" placeholder="e.g. Greater Manchester, North West England" />
+                    </label>
+                    <label class="biz-field">
+                        <span class="biz-field__label">Target Customers</span>
+                        <input v-model="profileForm.target_customer_summary" type="text" class="biz-field__input" placeholder="e.g. Homeowners, Small businesses" />
+                    </label>
+                    <div class="biz-form__actions">
+                        <button type="submit" class="btn btn--primary btn--sm" :disabled="profileSaving">
+                            {{ profileSaving ? 'Saving…' : 'Save Profile' }}
+                        </button>
+                        <span v-if="profileSaved" class="biz-form__saved">✓ Saved</span>
+                    </div>
+                </form>
+
+                <!-- Services -->
+                <form class="card biz-form" @submit.prevent="saveServices">
+                    <h3 class="biz-form__title">Your Services / Products</h3>
+                    <p class="biz-form__hint">List the main services or products you offer. These help us understand what keywords matter to you.</p>
+                    <div v-for="(svc, i) in servicesForm.services" :key="i" class="biz-form__row">
+                        <input v-model="svc.service_name" type="text" class="biz-field__input" :placeholder="`Service ${i + 1}`" />
+                        <button v-if="servicesForm.services.length > 1" type="button" class="biz-form__remove" @click="removeService(i)" title="Remove">×</button>
+                    </div>
+                    <button type="button" class="biz-form__add" @click="addService">+ Add service</button>
+                    <div class="biz-form__actions">
+                        <button type="submit" class="btn btn--primary btn--sm" :disabled="servicesSaving">
+                            {{ servicesSaving ? 'Saving…' : 'Save Services' }}
+                        </button>
+                        <span v-if="servicesSaved" class="biz-form__saved">✓ Saved</span>
+                    </div>
+                </form>
+
+                <!-- Competitors -->
+                <form class="card biz-form" @submit.prevent="saveCompetitors">
+                    <h3 class="biz-form__title">Competitors</h3>
+                    <p class="biz-form__hint">Add competitor websites you'd like to benchmark against. We'll use these in future keyword and visibility missions.</p>
+                    <div v-for="(comp, i) in competitorsForm.competitors" :key="i" class="biz-form__row">
+                        <input v-model="comp.domain" type="text" class="biz-field__input biz-field__input--wide" placeholder="competitor.com" />
+                        <input v-model="comp.label" type="text" class="biz-field__input" placeholder="Label (optional)" />
+                        <button v-if="competitorsForm.competitors.length > 1" type="button" class="biz-form__remove" @click="removeCompetitor(i)" title="Remove">×</button>
+                    </div>
+                    <button type="button" class="biz-form__add" @click="addCompetitor">+ Add competitor</button>
+                    <div class="biz-form__actions">
+                        <button type="submit" class="btn btn--primary btn--sm" :disabled="competitorsSaving">
+                            {{ competitorsSaving ? 'Saving…' : 'Save Competitors' }}
+                        </button>
+                        <span v-if="competitorsSaved" class="biz-form__saved">✓ Saved</span>
+                    </div>
+                </form>
+            </div>
 
             <!-- Danger zone -->
             <div class="card danger-zone">
@@ -353,5 +548,81 @@ function statusClass(status: string): string {
 .btn--danger { background: oklch(55% 0.15 25); color: #fff; border: none; cursor: pointer; }
 .btn--danger:hover { background: oklch(48% 0.17 25); }
 .btn--danger:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ═══ Tab bar ═══ */
+.tab-bar {
+    display: flex; gap: 0; margin-bottom: var(--space-xl);
+    border-bottom: 2px solid var(--color-border);
+}
+.tab-bar__tab {
+    padding: 10px 20px; font-size: 14px; font-weight: 600;
+    color: var(--color-text-muted); background: none; border: none;
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+    cursor: pointer; transition: color 0.2s, border-color 0.2s;
+}
+.tab-bar__tab:hover { color: var(--color-text); }
+.tab-bar__tab--active {
+    color: var(--color-cobalt);
+    border-bottom-color: var(--color-primary);
+}
+
+/* ═══ Business Context tab ═══ */
+.biz-context__intro {
+    font-size: 15px; color: var(--color-text-muted); line-height: 1.7;
+    margin: 0 0 var(--space-xl);
+}
+.biz-form { margin-bottom: var(--space-lg); }
+.biz-form__title {
+    font-size: 1rem; font-weight: 700; color: var(--color-cobalt);
+    margin: 0 0 var(--space-sm);
+}
+.biz-form__hint {
+    font-size: 13px; color: var(--color-text-muted); margin: 0 0 var(--space-md); line-height: 1.6;
+}
+.biz-form__grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+@media (max-width: 640px) { .biz-form__grid { grid-template-columns: 1fr; } }
+
+.biz-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--space-md); }
+.biz-field__label { font-size: 13px; font-weight: 600; color: var(--color-text); }
+.biz-field__input {
+    padding: 8px 12px; font-size: 14px; border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm); background: var(--color-surface);
+    color: var(--color-text); transition: border-color 0.2s;
+}
+.biz-field__input:focus { border-color: var(--color-primary); outline: none; }
+.biz-field__input--wide { flex: 2; }
+.biz-field__textarea {
+    padding: 8px 12px; font-size: 14px; border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm); background: var(--color-surface);
+    color: var(--color-text); resize: vertical; font-family: inherit;
+}
+.biz-field__textarea:focus { border-color: var(--color-primary); outline: none; }
+
+.biz-form__row {
+    display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm);
+}
+.biz-form__row .biz-field__input { flex: 1; }
+.biz-form__remove {
+    width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--color-border);
+    background: none; color: var(--color-text-muted); font-size: 16px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: background 0.2s, color 0.2s;
+}
+.biz-form__remove:hover { background: oklch(95% 0.04 27); color: oklch(55% 0.15 25); }
+.biz-form__add {
+    background: none; border: none; color: var(--color-primary);
+    font-size: 13px; font-weight: 600; cursor: pointer; padding: 4px 0;
+    margin-bottom: var(--space-md);
+}
+.biz-form__add:hover { text-decoration: underline; }
+.biz-form__actions { display: flex; align-items: center; gap: var(--space-md); }
+.biz-form__saved {
+    font-size: 13px; font-weight: 600; color: var(--color-success);
+    animation: fade-in 0.3s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 </style>
 

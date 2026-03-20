@@ -5,6 +5,7 @@ namespace App\Services\Scanner;
 use App\Models\ScanFinding;
 use App\Models\Site;
 use App\Models\SiteScan;
+use App\Services\Scanner\Checks\AnalyticsCheck;
 use App\Services\Scanner\Checks\BaseCheck;
 use App\Services\Scanner\Checks\HomepageCheck;
 use App\Services\Scanner\Checks\MetaTagCheck;
@@ -30,6 +31,7 @@ class SiteScanner
             new MetaTagCheck(),
             new TechnicalCheck(),
             new SecurityCheck(),
+            new AnalyticsCheck(),
         ];
     }
 

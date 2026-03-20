@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BusinessProfileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MissionController;
 use App\Http\Controllers\ScanController;
@@ -21,3 +22,7 @@ Route::post('/sites/{site}/missions/{mission}/activate', [MissionController::cla
 Route::post('/sites/{site}/missions/{mission}/tasks/{taskId}/complete', [MissionController::class, 'completeTask'])->name('missions.tasks.complete');
 Route::post('/sites/{site}/missions/{mission}/tasks/{taskId}/test', [MissionController::class, 'testTask'])->name('missions.tasks.test');
 Route::post('/sites/{site}/generate-sitemap', [MissionController::class, 'generateSitemap'])->name('sites.generate-sitemap');
+
+Route::put('/sites/{site}/business-profile', [BusinessProfileController::class, 'update'])->name('business-profile.update');
+Route::put('/sites/{site}/business-services', [BusinessProfileController::class, 'updateServices'])->name('business-services.update');
+Route::put('/sites/{site}/business-competitors', [BusinessProfileController::class, 'updateCompetitors'])->name('business-competitors.update');

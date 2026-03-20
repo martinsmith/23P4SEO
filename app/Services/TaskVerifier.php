@@ -40,6 +40,8 @@ class TaskVerifier
             'has_charset' => $this->checkHasCharset($site),
             // Security checks
             'has_x_content_type_options' => $this->checkHasXContentTypeOptions($site),
+            // Analytics checks
+            'has_analytics' => $this->checkHasAnalytics($site),
             default => ['passed' => false, 'message' => "Unknown check: {$checkName}", 'evidence' => []],
         };
     }
@@ -313,5 +315,51 @@ class TaskVerifier
             return ['passed' => true, 'message' => 'X-Content-Type-Options: nosniff header present', 'evidence' => []];
         }
         return ['passed' => false, 'message' => 'X-Content-Type-Options header missing or not set to nosniff', 'evidence' => []];
+    }
+
+    // --- Analytics checks ---
+
+    protected function checkHasAnalytics(Site $site): array
+    {
+        $h = $this->fetchHomepage($site);
+        if ($h['status'] !== 200) {
+            return ['passed' => false, 'message' => "Homepage returned HTTP {$h['status']}", 'evidence' => []];
+        }
+
+        $body = $h['body'];
+        $detected = [];
+
+        // GA4
+        if (preg_match('/gtag\s*\(\s*[\'"]config[\'"]\s*,\s*[\'"]G-[A-Z0-9]+[\'"]/i', $body)
+            || preg_match('/googletagmanager\.com\/gtag\/js\?id=G-[A-Z0-9]+/i', $body)) {
+            $detected[] = 'Google Analytics 4';
+        }
+        // GTM
+        if (preg_match('/googletagmanager\.com\/gtm\.js\?id=GTM-[A-Z0-9]+/i', $body)
+            || preg_match('/googletagmanager\.com\/ns\.html\?id=GTM-[A-Z0-9]+/i', $body)) {
+            $detected[] = 'Google Tag Manager';
+        }
+        // Matomo
+        if (preg_match('/matomo\.js|piwik\.js|_paq\.push/i', $body)) {
+            $detected[] = 'Matomo';
+        }
+        // Plausible
+        if (preg_match('/plausible\.io\/js\/script/i', $body)) {
+            $detected[] = 'Plausible';
+        }
+        // Fathom
+        if (preg_match('/usefathom\.com\/script\.js/i', $body)) {
+            $detected[] = 'Fathom';
+        }
+        // Clarity
+        if (preg_match('/clarity\.ms\/tag\//i', $body)) {
+            $detected[] = 'Microsoft Clarity';
+        }
+
+        if (!empty($detected)) {
+            return ['passed' => true, 'message' => 'Analytics detected: ' . implode(', ', $detected), 'evidence' => ['providers' => $detected]];
+        }
+
+        return ['passed' => false, 'message' => 'No analytics tracking detected on your homepage', 'evidence' => []];
     }
 }

@@ -357,6 +357,17 @@ class MissionGenerator
                 'title' => 'No Mixed Content',
                 'pass_summary' => 'All resources on your HTTPS page are loaded securely — no mixed content warnings for visitors.',
             ],
+
+            // === ANALYTICS ===
+            [
+                'pass_code' => 'pass_analytics',
+                'finding_codes' => ['no_analytics_detected'],
+                'category' => 'analytics',
+                'priority' => 60,
+                'impact' => 'high',
+                'title' => 'Analytics Tracking',
+                'pass_summary' => 'Your site has analytics tracking installed. You can measure traffic, understand visitor behaviour, and track the impact of your SEO improvements.',
+            ],
         ];
     }
 
@@ -861,6 +872,30 @@ class MissionGenerator
                     ['text' => 'Open browser DevTools and identify all mixed content warnings', 'type' => 'manual'],
                     ['text' => 'Update all resource URLs from http:// to https://', 'type' => 'manual'],
                     ['text' => 'If resources are from external domains, verify they support HTTPS', 'type' => 'manual'],
+                ],
+            ],
+
+            // === ANALYTICS ===
+            'no_analytics_detected' => [
+                'category' => 'analytics',
+                'priority' => 75,
+                'impact' => 'high',
+                'effort' => 'low',
+                'outcome' => 'You can measure your website traffic and track SEO progress',
+                'summary' => 'No analytics tracking was detected on your homepage. Without analytics you have no way to measure how many people visit your site, where they come from, or whether your SEO improvements are working.',
+                'rationale' => 'Analytics is the foundation of any website growth strategy. You can\'t improve what you can\'t measure. Even basic free tools like Google Analytics 4 give you essential insight into traffic, user behaviour, and the effectiveness of changes you make.',
+                'resources' => [
+                    ['type' => 'tip', 'label' => 'Which analytics tool?', 'content' => "Google Analytics 4 (GA4) is free and the most widely used. If you prefer privacy-focused alternatives, consider Plausible, Fathom, or Matomo."],
+                    ['type' => 'code', 'label' => 'Example: GA4 tracking snippet', 'content' => "<!-- Google tag (gtag.js) -->\n<script async src=\"https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX\"></script>\n<script>\n  window.dataLayer = window.dataLayer || [];\n  function gtag(){dataLayer.push(arguments);}\n  gtag('js', new Date());\n  gtag('config', 'G-XXXXXXXXXX');\n</script>"],
+                    ['type' => 'link', 'label' => 'Google Analytics setup guide', 'url' => 'https://support.google.com/analytics/answer/9304153'],
+                    ['type' => 'link', 'label' => 'Plausible Analytics (privacy-focused alternative)', 'url' => 'https://plausible.io'],
+                ],
+                'tasks' => [
+                    ['text' => 'Choose an analytics platform (Google Analytics 4 is recommended for most sites)', 'type' => 'manual'],
+                    ['text' => 'Create an account and set up a property/site for your domain', 'type' => 'manual'],
+                    ['text' => 'Copy the tracking snippet and paste it into the <head> of every page on your site', 'type' => 'manual'],
+                    ['text' => 'Visit your site and check the analytics dashboard to confirm data is being received', 'type' => 'manual'],
+                    ['text' => 'Verify analytics tracking is present on your homepage', 'type' => 'verify', 'validation' => ['check' => 'has_analytics']],
                 ],
             ],
 
