@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
@@ -80,6 +80,11 @@ const activeTab = ref('visibility');
 const scanning = ref(false);
 const showDeleteModal = ref(false);
 const deleting = ref(false);
+
+/* ── Refresh props on mount (handles back-navigation from mission detail) ── */
+onMounted(() => {
+    router.reload({ only: ['missions'] });
+});
 
 /* ── Sub-tab system ── */
 const visibilitySubTab = ref('technical');

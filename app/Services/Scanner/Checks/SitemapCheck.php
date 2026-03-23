@@ -4,7 +4,6 @@ namespace App\Services\Scanner\Checks;
 
 use App\Models\Site;
 use App\Services\Scanner\CheckResult;
-use Illuminate\Support\Facades\Http;
 
 class SitemapCheck extends BaseCheck
 {
@@ -20,7 +19,7 @@ class SitemapCheck extends BaseCheck
         $sitemapUrl = $baseUrl . '/sitemap.xml';
 
         try {
-            $response = Http::timeout(10)->get($sitemapUrl);
+            $response = $this->fetch($sitemapUrl, 10);
 
             if ($response->status() === 200) {
                 $body = $response->body();

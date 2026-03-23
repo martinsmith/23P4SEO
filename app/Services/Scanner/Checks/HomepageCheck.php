@@ -4,7 +4,6 @@ namespace App\Services\Scanner\Checks;
 
 use App\Models\Site;
 use App\Services\Scanner\CheckResult;
-use Illuminate\Support\Facades\Http;
 
 class HomepageCheck extends BaseCheck
 {
@@ -19,9 +18,7 @@ class HomepageCheck extends BaseCheck
         $url = rtrim($site->primary_url, '/') . '/';
 
         try {
-            $response = Http::timeout(15)
-                ->withHeaders(['User-Agent' => '23P4-Scanner/1.0'])
-                ->get($url);
+            $response = $this->fetch($url);
 
             $statusCode = $response->status();
             $body = $response->body();

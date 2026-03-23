@@ -4,7 +4,6 @@ namespace App\Services\Scanner\Checks;
 
 use App\Models\Site;
 use App\Services\Scanner\CheckResult;
-use Illuminate\Support\Facades\Http;
 
 class SearchConsoleCheck extends BaseCheck
 {
@@ -20,9 +19,7 @@ class SearchConsoleCheck extends BaseCheck
         $url = $baseUrl . '/';
 
         try {
-            $response = Http::timeout(15)
-                ->withHeaders(['User-Agent' => '23P4-Scanner/1.0'])
-                ->get($url);
+            $response = $this->fetch($url);
 
             if ($response->status() !== 200) {
                 return $findings;

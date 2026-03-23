@@ -4,7 +4,6 @@ namespace App\Services\Scanner\Checks;
 
 use App\Models\Site;
 use App\Services\Scanner\CheckResult;
-use Illuminate\Support\Facades\Http;
 
 class ServiceCoverageCheck extends BaseCheck
 {
@@ -86,9 +85,7 @@ class ServiceCoverageCheck extends BaseCheck
         $sitemapUrl = $baseUrl . '/sitemap.xml';
 
         try {
-            $response = Http::timeout(10)
-                ->withHeaders(['User-Agent' => '23P4-Scanner/1.0'])
-                ->get($sitemapUrl);
+            $response = $this->fetch($sitemapUrl, 10);
 
             if ($response->status() !== 200) {
                 return [];
@@ -110,9 +107,7 @@ class ServiceCoverageCheck extends BaseCheck
         $url = rtrim($site->primary_url, '/') . '/';
 
         try {
-            $response = Http::timeout(15)
-                ->withHeaders(['User-Agent' => '23P4-Scanner/1.0'])
-                ->get($url);
+            $response = $this->fetch($url);
 
             return $response->status() === 200 ? $response->body() : null;
         } catch (\Exception $e) {

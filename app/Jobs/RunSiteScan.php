@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Site;
+use App\Services\MissionGenerator;
 use App\Services\Scanner\SiteScanner;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -21,9 +22,10 @@ class RunSiteScan implements ShouldQueue
         public readonly Site $site,
     ) {}
 
-    public function handle(SiteScanner $scanner): void
+    public function handle(SiteScanner $scanner, MissionGenerator $missionGenerator): void
     {
-        $scanner->scan($this->site);
+        $scan = $scanner->scan($this->site);
+        $missionGenerator->reconcileMissions($this->site, $scan);
     }
 }
 

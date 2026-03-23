@@ -4,47 +4,78 @@ namespace App\Services;
 
 use App\Models\Mission;
 use App\Models\ScanFinding;
+use App\Models\Site;
 use App\Models\SiteScan;
 
 class MissionGenerator
 {
     /**
-     * Generate missions from scan findings.
-     * Skips info-level findings and findings that already have active missions.
+     * Single entry point: reconcile all missions for a site after a scan.
+     *
+     * 1. Create missions for new open findings (that have templates)
+     * 2. Delete missions for findings that are now resolved
+     * 3. Create 1:1 pass missions for checks that passed
+     * 4. Delete pass missions for checks that regressed
+     * 5. Update mission content when template version changes
      */
-    public function generateFromScan(SiteScan $scan): array
+    public function reconcileMissions(Site $site, SiteScan $scan): void
     {
-        $findings = $scan->findings()
-            ->where('severity', '!=', 'info')
+        // Get current open finding codes for this site
+        $openFindings = ScanFinding::where('site_id', $site->id)
             ->where('status', 'open')
+            ->where('severity', '!=', 'info')
             ->get();
 
-        $created = [];
+        $openCodes = $openFindings->pluck('code')->toArray();
 
-        foreach ($findings as $finding) {
+        // --- (1) Create missions for new open findings ---
+        foreach ($openFindings as $finding) {
             $template = $this->templateFor($finding->code);
-
             if (!$template) {
                 continue;
             }
 
-            // Skip if an open mission already exists for this finding code on this site.
-            $existingMission = Mission::where('site_id', $finding->site_id)
-                ->whereIn('status', ['suggested', 'active', 'in_progress'])
+            $existing = Mission::where('site_id', $site->id)
                 ->where('source_type', 'scan_finding')
                 ->where('source_finding_code', $finding->code)
+                ->whereIn('status', ['suggested', 'active', 'in_progress'])
                 ->first();
 
-            if ($existingMission) {
+            if ($existing) {
+                // (5) Check template version — update content if template changed
+                $currentVersion = $template['version'] ?? 1;
+                if (($existing->template_version ?? 1) < $currentVersion) {
+                    $existing->update([
+                        'source_finding_title' => $finding->title,
+                        'outcome_statement' => $template['outcome'],
+                        'user_summary' => $template['summary'],
+                        'rationale_summary' => $template['rationale'],
+                        'resources_json' => $template['resources'] ?? [],
+                        'template_version' => $currentVersion,
+                    ]);
+                    // Recreate tasks
+                    $existing->tasks()->delete();
+                    foreach ($template['tasks'] as $i => $task) {
+                        $existing->tasks()->create([
+                            'sort_order' => $i + 1,
+                            'task_text' => $task['text'],
+                            'task_type' => $task['type'],
+                            'target_url' => $task['target_url'] ?? null,
+                            'validation_rule_json' => $task['validation'] ?? null,
+                            'status' => 'pending',
+                        ]);
+                    }
+                }
                 continue;
             }
 
             $mission = Mission::create([
-                'site_id' => $finding->site_id,
+                'site_id' => $site->id,
                 'source_scan_id' => $scan->id,
                 'source_type' => 'scan_finding',
                 'source_finding_title' => $finding->title,
                 'source_finding_code' => $finding->code,
+                'template_version' => $template['version'] ?? 1,
                 'category' => $template['category'],
                 'status' => 'suggested',
                 'priority_score' => $template['priority'],
@@ -57,7 +88,6 @@ class MissionGenerator
                 'created_by' => 'system',
             ]);
 
-            // Create tasks
             foreach ($template['tasks'] as $i => $task) {
                 $mission->tasks()->create([
                     'sort_order' => $i + 1,
@@ -68,120 +98,70 @@ class MissionGenerator
                     'status' => 'pending',
                 ]);
             }
-
-            $created[] = $mission;
         }
 
-        return $created;
-    }
-
-    /**
-     * Auto-complete missions whose source finding is no longer present in the latest scan.
-     * Called after generateFromScan to "heal" missions that the user has fixed.
-     */
-    public function healFromScan(SiteScan $scan): array
-    {
-        // Get all finding codes from this scan (non-info, open)
-        $currentFindingCodes = $scan->findings()
-            ->where('severity', '!=', 'info')
-            ->where('status', 'open')
-            ->pluck('code')
-            ->toArray();
-
-        // Find open missions for this site that have a source_finding_code
-        // and whose code is NOT in the current scan findings
-        $missionsToHeal = Mission::where('site_id', $scan->site_id)
-            ->whereIn('status', ['suggested', 'active', 'in_progress'])
+        // --- (2) Delete missions for resolved findings ---
+        $resolvedMissions = Mission::where('site_id', $site->id)
             ->where('source_type', 'scan_finding')
+            ->whereIn('status', ['suggested', 'active', 'in_progress'])
             ->whereNotNull('source_finding_code')
-            ->when(count($currentFindingCodes) > 0, function ($query) use ($currentFindingCodes) {
-                $query->whereNotIn('source_finding_code', $currentFindingCodes);
-            })
-            ->get();
+            ->where('source_finding_code', 'not like', 'pass_%');
 
-        $healed = [];
-
-        foreach ($missionsToHeal as $mission) {
-            // Complete all pending tasks
-            $mission->tasks()
-                ->where('status', '!=', 'completed')
-                ->update([
-                    'status' => 'completed',
-                    'completed_at' => now(),
-                ]);
-
-            // Complete the mission
-            $mission->update([
-                'status' => 'completed',
-                'completed_at' => now(),
-            ]);
-
-            $healed[] = $mission;
+        if (!empty($openCodes)) {
+            $resolvedMissions = $resolvedMissions->whereNotIn('source_finding_code', $openCodes);
         }
 
-        return $healed;
-    }
+        $resolvedMissions->each(function ($m) {
+            $m->tasks()->delete();
+            $m->delete();
+        });
 
-    /**
-     * Generate pre-completed missions for checks that passed (no issues found).
-     * These provide informative "you're doing this right" cards.
-     */
-    public function generatePassMissions(SiteScan $scan): array
-    {
-        // Get all finding codes from this scan (non-info, open)
-        $failedCodes = $scan->findings()
-            ->where('severity', '!=', 'info')
-            ->where('status', 'open')
-            ->pluck('code')
-            ->toArray();
-
-        $created = [];
-
+        // --- (3) & (4) Pass missions ---
         foreach ($this->passTemplates() as $passTemplate) {
-            // If ANY of the related finding codes fired, this area has a problem — skip
-            $hasFailing = !empty(array_intersect($passTemplate['finding_codes'], $failedCodes));
+            $hasFailing = !empty(array_intersect($passTemplate['finding_codes'], $openCodes));
+
             if ($hasFailing) {
+                // (4) Delete pass mission if check regressed
+                Mission::where('site_id', $site->id)
+                    ->where('source_type', 'scan_finding')
+                    ->where('source_finding_code', $passTemplate['pass_code'])
+                    ->each(function ($m) { $m->tasks()->delete(); $m->delete(); });
                 continue;
             }
 
-            // Skip if a mission already exists for this pass code
-            $existingMission = Mission::where('site_id', $scan->site_id)
+            // (3) Create pass mission if it doesn't exist
+            $existingPass = Mission::where('site_id', $site->id)
                 ->where('source_type', 'scan_finding')
                 ->where('source_finding_code', $passTemplate['pass_code'])
                 ->first();
 
-            if ($existingMission) {
-                continue;
+            if (!$existingPass) {
+                Mission::create([
+                    'site_id' => $site->id,
+                    'source_scan_id' => $scan->id,
+                    'source_type' => 'scan_finding',
+                    'source_finding_title' => $passTemplate['title'],
+                    'source_finding_code' => $passTemplate['pass_code'],
+                    'template_version' => 1,
+                    'category' => $passTemplate['category'],
+                    'status' => 'completed',
+                    'priority_score' => $passTemplate['priority'],
+                    'impact_level' => $passTemplate['impact'],
+                    'effort_level' => 'low',
+                    'outcome_statement' => $passTemplate['title'],
+                    'user_summary' => $passTemplate['pass_summary'],
+                    'rationale_summary' => null,
+                    'resources_json' => [],
+                    'created_by' => 'system',
+                    'completed_at' => now(),
+                ]);
             }
-
-            $mission = Mission::create([
-                'site_id' => $scan->site_id,
-                'source_scan_id' => $scan->id,
-                'source_type' => 'scan_finding',
-                'source_finding_title' => $passTemplate['title'],
-                'source_finding_code' => $passTemplate['pass_code'],
-                'category' => $passTemplate['category'],
-                'status' => 'completed',
-                'priority_score' => $passTemplate['priority'],
-                'impact_level' => $passTemplate['impact'],
-                'effort_level' => 'low',
-                'outcome_statement' => $passTemplate['title'],
-                'user_summary' => $passTemplate['pass_summary'],
-                'rationale_summary' => null,
-                'resources_json' => [],
-                'created_by' => 'system',
-                'completed_at' => now(),
-            ]);
-
-            $created[] = $mission;
         }
-
-        return $created;
     }
 
     /**
-     * Templates for passing checks — grouped by check area.
-     * Each entry lists the finding codes that, if absent, mean the area is healthy.
+     * Templates for passing checks — 1:1 mapping per finding code.
+     * Each entry lists the finding codes that, if absent, mean this specific check passed.
      */
     protected function passTemplates(): array
     {
@@ -369,15 +349,51 @@ class MissionGenerator
                 'pass_summary' => 'Your site has analytics tracking installed. You can measure traffic, understand visitor behaviour, and track the impact of your SEO improvements.',
             ],
 
-            // === LOCAL SEO ===
+            // === LOCAL SEO (1:1 pass missions) ===
             [
-                'pass_code' => 'pass_local_seo',
-                'finding_codes' => ['homepage_no_location', 'title_no_location', 'no_local_schema', 'no_gbp_link', 'homepage_no_business_name'],
+                'pass_code' => 'pass_location_on_homepage',
+                'finding_codes' => ['homepage_no_location'],
+                'category' => 'local_seo',
+                'priority' => 80,
+                'impact' => 'high',
+                'title' => 'Location on Homepage ✓',
+                'pass_summary' => 'Your homepage mentions your location, helping search engines connect your site to local searches in your area.',
+            ],
+            [
+                'pass_code' => 'pass_location_in_title',
+                'finding_codes' => ['title_no_location'],
                 'category' => 'local_seo',
                 'priority' => 70,
                 'impact' => 'high',
-                'title' => 'Local SEO Signals',
-                'pass_summary' => 'Your homepage has strong local SEO signals — your location, business name, and local structured data are all present, giving you a solid foundation for local search visibility.',
+                'title' => 'Location in Title Tag ✓',
+                'pass_summary' => 'Your homepage title includes your location — one of the strongest signals for local search ranking.',
+            ],
+            [
+                'pass_code' => 'pass_local_schema',
+                'finding_codes' => ['no_local_schema'],
+                'category' => 'local_seo',
+                'priority' => 60,
+                'impact' => 'medium',
+                'title' => 'Local Business Schema ✓',
+                'pass_summary' => 'Your site has LocalBusiness structured data, making it eligible for rich results like map listings and knowledge panels.',
+            ],
+            [
+                'pass_code' => 'pass_gbp_link',
+                'finding_codes' => ['no_gbp_link'],
+                'category' => 'local_seo',
+                'priority' => 55,
+                'impact' => 'medium',
+                'title' => 'Google Business Profile ✓',
+                'pass_summary' => 'Your site links to your Google Business Profile, reinforcing your local presence and making it easy for visitors to find reviews and directions.',
+            ],
+            [
+                'pass_code' => 'pass_business_name',
+                'finding_codes' => ['homepage_no_business_name'],
+                'category' => 'local_seo',
+                'priority' => 50,
+                'impact' => 'medium',
+                'title' => 'Business Name on Homepage ✓',
+                'pass_summary' => 'Your business name is visible on your homepage, supporting NAP consistency for local SEO.',
             ],
 
             // === SERVICE COVERAGE ===
@@ -997,16 +1013,22 @@ class MissionGenerator
                 'effort' => 'low',
                 'outcome' => 'Your site links to your Google Business Profile',
                 'summary' => 'Your homepage does not link to a Google Business Profile listing. Linking to your GBP helps customers find your reviews, directions, and contact details, and reinforces your local presence to Google.',
-                'rationale' => 'A Google Business Profile is essential for local businesses. Linking from your website to your GBP creates a clear connection between your web presence and your Google listing.',
+                'rationale' => 'A Google Business Profile is essential for local businesses. Linking from your website to your GBP creates a clear connection between your web presence and your Google listing. It also makes it easy for visitors to leave reviews, get directions, and see your opening hours.',
                 'resources' => [
-                    ['type' => 'tip', 'label' => 'Don\'t have a GBP yet?', 'content' => 'Create one for free at business.google.com. It\'s one of the most impactful things a local business can do for search visibility.'],
+                    ['type' => 'tip', 'label' => 'What is a Google Business Profile link?', 'content' => 'A GBP link points to your business listing on Google Maps or Google Search. It typically looks like one of these formats:' . "\n\n" . '• https://maps.google.com/?cid=XXXXXXXXXX' . "\n" . '• https://g.page/your-business-name' . "\n" . '• https://www.google.com/maps/place/Your+Business+Name/' . "\n\n" . 'You can find your link by searching for your business on Google Maps, clicking "Share", and copying the link.'],
+                    ['type' => 'code', 'label' => 'Example: GBP link in your website footer', 'content' => '<footer>' . "\n" . '  <div class="footer-links">' . "\n" . '    <a href="https://g.page/your-business" target="_blank" rel="noopener">' . "\n" . '      Find us on Google Maps' . "\n" . '    </a>' . "\n" . '  </div>' . "\n" . '</footer>'],
+                    ['type' => 'code', 'label' => 'Example: GBP link with an icon in a contact section', 'content' => '<section class="contact">' . "\n" . '  <h2>Find Us</h2>' . "\n" . '  <a href="https://maps.google.com/?cid=XXXXXXXXXX"' . "\n" . '     target="_blank" rel="noopener">' . "\n" . '    📍 View on Google Maps — Reviews, Directions &amp; Hours' . "\n" . '  </a>' . "\n" . '</section>'],
+                    ['type' => 'tip', 'label' => 'Where to place it', 'content' => 'The best places for your GBP link are:' . "\n\n" . '1. **Website footer** — appears on every page, easy for visitors and crawlers to find' . "\n" . '2. **Contact page** — natural place alongside your address and phone number' . "\n" . '3. **Homepage sidebar or hero section** — high visibility for new visitors' . "\n\n" . 'The footer is the most common and recommended location because it ensures the link is present on every page of your site.'],
+                    ['type' => 'tip', 'label' => 'Don\'t have a GBP yet?', 'content' => 'Create one for free at business.google.com. You\'ll need to verify your business (usually by postcard, phone, or email). Once verified, you can manage your listing, respond to reviews, and post updates.'],
                     ['type' => 'link', 'label' => 'Google Business Profile', 'url' => 'https://business.google.com'],
                     ['type' => 'link', 'label' => 'Google: Set up your Business Profile', 'url' => 'https://support.google.com/business/answer/10514137'],
+                    ['type' => 'link', 'label' => 'Find your GBP share link', 'url' => 'https://support.google.com/business/answer/12174703'],
                 ],
                 'tasks' => [
-                    ['text' => 'If you don\'t have one, create a Google Business Profile at business.google.com', 'type' => 'manual'],
-                    ['text' => 'Add a link to your GBP listing or Google Maps location on your homepage', 'type' => 'manual'],
-                    ['text' => 'Consider adding it to your footer so it appears on every page', 'type' => 'manual'],
+                    ['text' => 'If you don\'t have one, create a Google Business Profile at business.google.com and verify your business', 'type' => 'manual'],
+                    ['text' => 'Find your GBP link: search for your business on Google Maps, click "Share", and copy the link', 'type' => 'manual'],
+                    ['text' => 'Add the link to your website footer using an <a> tag (see the code examples above)', 'type' => 'manual'],
+                    ['text' => 'Consider also adding it to your contact page alongside your address and phone number', 'type' => 'manual'],
                     ['text' => 'Verify GBP link is present on homepage', 'type' => 'verify', 'validation' => ['check' => 'has_gbp_link']],
                 ],
             ],

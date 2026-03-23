@@ -4,7 +4,6 @@ namespace App\Services\Scanner\Checks;
 
 use App\Models\Site;
 use App\Services\Scanner\CheckResult;
-use Illuminate\Support\Facades\Http;
 
 class LocalSEOCheck extends BaseCheck
 {
@@ -31,9 +30,7 @@ class LocalSEOCheck extends BaseCheck
         $url = rtrim($site->primary_url, '/') . '/';
 
         try {
-            $response = Http::timeout(15)
-                ->withHeaders(['User-Agent' => '23P4-Scanner/1.0'])
-                ->get($url);
+            $response = $this->fetch($url);
 
             if ($response->status() !== 200) {
                 return $findings;

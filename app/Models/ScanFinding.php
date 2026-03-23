@@ -20,6 +20,7 @@ class ScanFinding extends Model
         'status',
         'first_detected_at',
         'last_detected_at',
+        'resolved_at',
     ];
 
     protected function casts(): array

@@ -4,7 +4,6 @@ namespace App\Services\Scanner\Checks;
 
 use App\Models\Site;
 use App\Services\Scanner\CheckResult;
-use Illuminate\Support\Facades\Http;
 
 class RobotsTxtCheck extends BaseCheck
 {
@@ -19,7 +18,7 @@ class RobotsTxtCheck extends BaseCheck
         $url = rtrim($site->primary_url, '/') . '/robots.txt';
 
         try {
-            $response = Http::timeout(10)->get($url);
+            $response = $this->fetch($url, 10);
 
             if ($response->status() === 200) {
                 $body = $response->body();

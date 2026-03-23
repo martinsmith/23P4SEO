@@ -14,6 +14,7 @@ class Mission extends Model
         'source_type',
         'source_finding_title',
         'source_finding_code',
+        'template_version',
         'category',
         'status',
         'priority_score',
@@ -24,6 +25,7 @@ class Mission extends Model
         'rationale_summary',
         'resources_json',
         'created_by',
+        'completed_at',
     ];
 
     protected function casts(): array

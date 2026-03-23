@@ -81,23 +81,61 @@ class SiteScanner
             }
         }
 
-        // Store findings
+        // === Site-level findings reconciliation ===
         $now = Carbon::now();
+        $currentCodes = [];
+
         foreach ($allFindings as $finding) {
-            $scan->findings()->create([
-                'site_id' => $site->id,
-                'category' => $finding->category,
-                'code' => $finding->code,
-                'severity' => $finding->severity,
-                'title' => $finding->title,
-                'summary' => $finding->summary,
-                'evidence_json' => $finding->evidence,
-                'is_blocker' => $finding->isBlocker,
-                'status' => 'open',
-                'first_detected_at' => $now,
-                'last_detected_at' => $now,
-            ]);
+            $currentCodes[] = $finding->code;
+
+            // Upsert: create or update keyed on site_id + code
+            $existing = ScanFinding::where('site_id', $site->id)
+                ->where('code', $finding->code)
+                ->first();
+
+            if ($existing) {
+                $existing->update([
+                    'site_scan_id' => $scan->id,
+                    'category' => $finding->category,
+                    'severity' => $finding->severity,
+                    'title' => $finding->title,
+                    'summary' => $finding->summary,
+                    'evidence_json' => $finding->evidence,
+                    'is_blocker' => $finding->isBlocker,
+                    'status' => 'open',
+                    'last_detected_at' => $now,
+                    'resolved_at' => null,
+                ]);
+            } else {
+                ScanFinding::create([
+                    'site_id' => $site->id,
+                    'site_scan_id' => $scan->id,
+                    'category' => $finding->category,
+                    'code' => $finding->code,
+                    'severity' => $finding->severity,
+                    'title' => $finding->title,
+                    'summary' => $finding->summary,
+                    'evidence_json' => $finding->evidence,
+                    'is_blocker' => $finding->isBlocker,
+                    'status' => 'open',
+                    'first_detected_at' => $now,
+                    'last_detected_at' => $now,
+                ]);
+            }
         }
+
+        // Resolve findings that are no longer detected
+        $resolveQuery = ScanFinding::where('site_id', $site->id)
+            ->where('status', 'open');
+
+        if (!empty($currentCodes)) {
+            $resolveQuery->whereNotIn('code', $currentCodes);
+        }
+
+        $resolveQuery->update([
+            'status' => 'resolved',
+            'resolved_at' => $now,
+        ]);
 
         // Count by severity
         $severityCounts = [];
